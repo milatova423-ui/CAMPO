@@ -1,0 +1,92 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gestión de Residuos Peligrosos</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#f6f7f5;--fg:#1d2420;--card:#fff;--ac:#2f6b3f;--bd:#d9ddd8;--mut:#667}
+@media(prefers-color-scheme:dark){:root{--bg:#161a17;--fg:#e8ece9;--card:#202622;--ac:#4f9e66;--bd:#34403a;--mut:#9aa}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+nav{background:var(--ac);padding:.6rem 1rem;display:flex;gap:1rem;flex-wrap:wrap}nav a{color:#fff;text-decoration:none;font-weight:600}
+main{max-width:1200px;margin:1rem auto;padding:0 1rem}.card{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:1rem;margin-bottom:1rem}
+.sc{overflow-x:auto}table{border-collapse:collapse;width:100%}th,td{padding:.4rem .6rem;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
+th{font-size:.8rem;text-transform:uppercase;color:var(--mut)}td.w{white-space:normal}
+.b{background:var(--ac);color:#fff;border:0;border-radius:6px;padding:.45rem .9rem;cursor:pointer;text-decoration:none;font-size:14px;display:inline-block}
+.b.s{background:transparent;color:var(--ac);border:1px solid var(--ac)}.b.d{background:#b3261e}
+input,select,textarea{width:100%;padding:.45rem;border:1px solid var(--bd);border-radius:6px;background:var(--card);color:var(--fg);font:inherit}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:.8rem}label{font-size:.85rem;color:var(--mut)}
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.8rem}.gal img{width:100%;height:140px;object-fit:cover;border-radius:6px}
+.r{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;justify-content:space-between}.n{font-size:1.8rem;font-weight:700;color:var(--ac)}a{color:var(--ac)}
+</style></head><body><nav id="nav"></nav><main id="app"></main>
+<script>
+const C=['BULK DRUM','BIG BAG','PALLET','BOLSA','CANASTILLA','CAJA DE MADERA','CILINDRO','OTRO'],F=['SÓLIDO','LÍQUIDO','SEMISÓLIDO'];
+const TA=['Foto','Guía de remisión','Manifiesto','Certificado de disposición','Reporte','Otro'];
+// Campos: [clave, etiqueta, tipo]  tipo: n=número d=fecha a=texto largo [..]=lista
+const E={
+inventario:{t:'Inventario de residuos',f:[['ubicacion','Ubicación de residuos'],['clasificacion','Clasificación'],['generado_en','Generado en'],['procedencia','Procedencia'],['almacen','Almacén'],['tipo_residuo','Tipo de residuo'],['especificaciones','Especificaciones del residuo'],['codigo','Código'],['tipo_contenedor','Tipo de contenedor',C],['estado','Estado',F],['cantidad','Cantidad','n'],['estado_contenedor','Estado del contenedor',['ACEPTABLE','REACONDICIONAR','DAÑADO']],['comentario','Comentario','a']]},
+reporte:{t:'Reporte diario de recolección',f:[['fecha','Fecha','d'],['empresa','Empresa contratada para la disposición final'],['lugar','Lugar'],['elaborado_por','Elaborado por'],['generador','Generador'],['actividad','Actividad desarrollada','a'],['ubicacion','Ubicación'],['procedencia','Procedencia'],['tipo_residuo','Tipo de residuo'],['u_m','U/M',C],['cantidad','Cantidad','n'],['lugar_acopio','Lugar de acopio'],['contenido','Contenido','a'],['personal','Personal'],['cargo','Cargo']]},
+traslado_interno:{t:'Traslado interno terrestre',f:[['sector','Sector'],['ruta','Ruta'],['generacion','Generación'],['fecha_traslado','Fecha de traslado','d'],['tipo_contenedor','Tipo de contenedor',C],['cantidad','Cantidad','n'],['descripcion_residuo','Descripción de residuo'],['tipo_vehiculo','Tipo de vehículo'],['placa','Placa'],['volumen_inicial','Volumen inicial (m3)','n'],['volumen_total','Volumen total (m3)','n'],['situacion','Situación',['ACOPIADO','EN TRÁNSITO','DISPOSICIÓN FINAL']],['observaciones','Observaciones','a'],['n_guia','N° Guía']]},
+traslado_externo:{t:'Traslado externo fluvial',f:[['sector','Sector'],['lugar_embarque','Lugar de embarque'],['procedencia','Procedencia'],['fecha_embarque','Fecha embarque/zarpe','d'],['descripcion_residuo','Descripción de residuo'],['estado','Estado',F],['cant_contenedores','Cant. contenedores','n'],['tipo_contenedor','Tipo de contenedor',C],['embarque_fluvial','Embarque fluvial (embarcación)'],['observaciones','Observaciones','a'],['n_guia','N° Guía']]}};
+// ---------- Base de datos local (IndexedDB) ----------
+const DB=new Promise((ok,no)=>{const q=indexedDB.open('residuos',1);q.onupgradeneeded=()=>{[...Object.keys(E),'archivos'].forEach(k=>q.result.createObjectStore(k,{keyPath:'id',autoIncrement:true}))};q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)});
+const tx=async(s,m,f)=>{const d=await DB;return new Promise((ok,no)=>{const t=d.transaction(s,m),r=f(t.objectStore(s));t.oncomplete=()=>ok(r.result);t.onerror=()=>no(t.error)})};
+const all=s=>tx(s,'readonly',o=>o.getAll()),get=(s,i)=>tx(s,'readonly',o=>o.get(i)),put=(s,v)=>tx(s,'readwrite',o=>o.put(v)),del=(s,i)=>tx(s,'readwrite',o=>o.delete(i));
+// ---------- Utilidades ----------
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fv=(v,t)=>v==null||v===''?'':t==='d'?v.split('-').reverse().join('/'):v;
+const norm=s=>String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+const $=id=>document.getElementById(id),app=$('app');
+$('nav').innerHTML='<a href="#/">Panel</a>'+Object.entries(E).map(([k,e])=>`<a href="#/${k}">${e.t}</a>`).join('');
+const conv=(t,v)=>{if(v==null||v==='')return null;if(t==='n'){const x=parseFloat(String(v).replace(',','.'));return isNaN(x)?null:x}
+ if(t==='d'){if(v instanceof Date)return new Date(v-v.getTimezoneOffset()*6e4).toISOString().slice(0,10);const m=String(v).match(/^(\d{4})-(\d\d)-(\d\d)/);return m?m[0]:null}return String(v).trim()||null};
+function input(c,v){const[n,,t]=c,val=v?.[n]??'';
+ if(t==='a')return`<textarea name="${n}" rows="3">${esc(val)}</textarea>`;
+ if(Array.isArray(t))return`<select name="${n}"><option></option>${t.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('')}</select>`;
+ return`<input name="${n}" type="${t==='n'?'number" step="any':t==='d'?'date':'text'}" value="${esc(val)}">`}
+// ---------- Vistas ----------
+async function dash(){const inv=await all('inventario');
+ const piv=(f,c)=>{const d={},cs=new Set;inv.forEach(r=>{const a=r[f]||'(vacío)',b=r[c]||'(vacío)';cs.add(b);(d[a]??={})[b]=(d[a][b]||0)+(r.cantidad||0)});
+  const C2=[...cs].sort();return`<div class="sc"><table><tr><th></th>${C2.map(c=>`<th>${esc(c)}</th>`).join('')}<th>Total</th></tr>${Object.keys(d).sort().map(a=>`<tr><td>${esc(a)}</td>${C2.map(c=>`<td>${d[a][c]||0}</td>`).join('')}<td><b>${Object.values(d[a]).reduce((x,y)=>x+y,0)}</b></td></tr>`).join('')||'<tr><td>Sin datos todavía.</td></tr>'}</table></div>`};
+ let cards='';for(const k in E)cards+=`<a class="card" href="#/${k}" style="text-decoration:none;color:inherit"><div class="n">${(await all(k)).length}</div>${E[k].t}</a>`;
+ cards+=`<div class="card"><div class="n">${(await all('archivos')).length}</div>Documentos y fotos</div>`;
+ app.innerHTML=`<h2>Panel general</h2><div class="g">${cards}</div><div class="card"><h3>Inventario: tipo de residuo × tipo de contenedor</h3>${piv('tipo_residuo','tipo_contenedor')}</div><div class="card"><h3>Inventario: contenedor × estado del contenedor</h3>${piv('tipo_contenedor','estado_contenedor')}</div>
+ <p style="color:var(--mut)">Los datos y archivos se guardan en este navegador. Usa «Exportar Excel» en cada módulo para tener respaldo.</p>`}
+async function list(k,q=''){const e=E[k],rows=(await all(k)).reverse(),ar=await all('archivos'),qq=norm(q);
+ const f=rows.filter(r=>!qq||e.f.some(c=>norm(r[c[0]]).includes(qq)));
+ app.innerHTML=`<div class="r"><h2>${e.t}</h2><div class="r"><a class="b" href="#/${k}/nuevo">+ Nuevo</a><a class="b s" href="#/${k}/importar">Importar Excel</a><button class="b s" onclick="exportar('${k}')">Exportar Excel</button></div></div>
+ <div class="card"><input id="q" placeholder="Buscar..." value="${esc(q)}" style="max-width:360px"></div>
+ <div class="card sc"><table><tr><th>#</th>${e.f.map(c=>`<th>${c[1]}</th>`).join('')}<th>Adj.</th></tr>${f.map(r=>`<tr><td><a href="#/${k}/${r.id}">${r.id}</a></td>${e.f.map(c=>`<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(fv(r[c[0]],c[2]))}</td>`).join('')}<td>${ar.filter(a=>a.entidad===k&&a.rid===r.id).length}</td></tr>`).join('')||'<tr><td>No hay registros.</td></tr>'}</table></div>`;
+ const i=$('q');i.oninput=()=>{const p=i.selectionStart;list(k,i.value).then(()=>{$('q').focus();$('q').setSelectionRange(p,p)})}}
+async function form(k,id){const e=E[k],r=id?await get(k,id):null;
+ app.innerHTML=`<h2>${id?'Editar':'Nuevo'} · ${e.t}</h2><form id="f" class="card"><div class="g">${e.f.map(c=>`<div ${c[2]==='a'?'style="grid-column:1/-1"':''}><label>${c[1]}</label>${input(c,r)}</div>`).join('')}</div>
+ <p class="r" style="justify-content:flex-start"><button class="b">Guardar</button><a class="b s" href="#/${k}">Cancelar</a></p></form>`;
+ $('f').onsubmit=async ev=>{ev.preventDefault();const fd=new FormData(ev.target),o=r||{};e.f.forEach(c=>o[c[0]]=conv(c[2],fd.get(c[0])));const nid=await put(k,o);location.hash=`#/${k}/${nid}`}}
+async function detail(k,id){const e=E[k],r=await get(k,id);if(!r)return location.hash='#/'+k;
+ const ar=(await all('archivos')).filter(a=>a.entidad===k&&a.rid===id).reverse();
+ app.innerHTML=`<div class="r"><h2>${e.t} #${id}</h2><div class="r"><a class="b" href="#/${k}/${id}/editar">Editar</a><button class="b d" onclick="borrar('${k}',${id})">Eliminar</button></div></div>
+ <div class="card sc"><table>${e.f.map(c=>`<tr><th>${c[1]}</th><td class="w">${esc(fv(r[c[0]],c[2]))}</td></tr>`).join('')}</table></div>
+ <div class="card"><h3>Documentos y fotos</h3><div class="g"><div><label>Tipo</label><select id="tp">${TA.map(t=>`<option>${t}</option>`).join('')}</select></div>
+ <div><label>Archivos (fotos, PDF, Word, Excel)</label><input id="fl" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"></div>
+ <div><label>Nota</label><input id="nt"></div><div style="align-self:end"><button class="b" onclick="subir('${k}',${id})">Subir</button></div></div></div>
+ <div class="gal">${ar.map(a=>{const u=URL.createObjectURL(a.blob),img=a.blob.type.startsWith('image/');return`<div class="card">${img?`<a href="${u}" target="_blank"><img src="${u}" alt=""></a>`:`<a href="${u}" download="${esc(a.nombre)}">📄 ${esc(a.nombre)}</a>`}<p><b>${esc(a.tipo)}</b><br><small>${esc(a.nota||'')} · ${a.fecha}</small></p><button class="b d" onclick="quitar(${a.id},'${k}',${id})">Quitar</button></div>`}).join('')}</div>`}
+function imp(k){const e=E[k];app.innerHTML=`<h2>Importar Excel · ${e.t}</h2><div class="card"><p>Sube un .xlsx cuya primera hoja tenga estos encabezados (el orden no importa; se detecta la fila de títulos):</p><p><small>${e.f.map(c=>c[1]).join(' · ')}</small></p><input type="file" id="x" accept=".xlsx,.xls"><p><button class="b" onclick="importar('${k}')">Importar</button></p></div>`}
+// ---------- Acciones ----------
+async function subir(k,rid){const fs=[...$('fl').files];if(!fs.length)return alert('Elige al menos un archivo.');
+ for(const f of fs)await put('archivos',{entidad:k,rid,tipo:$('tp').value,nota:$('nt').value,nombre:f.name,blob:f,fecha:new Date().toLocaleDateString('es-PE')});detail(k,rid)}
+async function quitar(a,k,id){if(confirm('¿Quitar archivo?')){await del('archivos',a);detail(k,id)}}
+async function borrar(k,id){if(!confirm('¿Eliminar registro y sus archivos?'))return;
+ for(const a of await all('archivos'))if(a.entidad===k&&a.rid===id)await del('archivos',a.id);await del(k,id);location.hash='#/'+k}
+async function exportar(k){const e=E[k],rows=await all(k),ws=XLSX.utils.aoa_to_sheet([e.f.map(c=>c[1]),...rows.map(r=>e.f.map(c=>r[c[0]]??''))]),wb=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(wb,ws,e.t.slice(0,31));XLSX.writeFile(wb,`${k}_${new Date().toISOString().slice(0,10)}.xlsx`)}
+async function importar(k){const f=$('x').files[0];if(!f)return alert('Elige un archivo .xlsx');const e=E[k];
+ const wb=XLSX.read(await f.arrayBuffer(),{cellDates:true}),rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true,defval:null}),mp=new Map(e.f.map(c=>[norm(c[1]),c]));
+ let cab=null,n=0;for(let i=0;i<rows.length;i++){const r=rows[i];
+  if(!cab){const m=r.map(c=>mp.get(norm(c))||null);if(m.filter(Boolean).length>=3)cab=m;else if(i>15)break;continue}
+  if(!r.some(c=>c!=null&&c!=='')||String(r[0]||'').toUpperCase().startsWith('TOTAL'))continue;
+  const o={};cab.forEach((c,j)=>{if(c)o[c[0]]=conv(c[2],r[j])});await put(k,o);n++}
+ if(!cab)return alert('No se encontró una fila de encabezados reconocible.');alert(`Importados ${n} registros.`);location.hash='#/'+k}
+// ---------- Rutas ----------
+async function route(){const[,k,a,b]=location.hash.split('/');window.scrollTo(0,0);
+ if(!k)return dash();if(!E[k])return dash();if(!a)return list(k);if(a==='nuevo')return form(k);if(a==='importar')return imp(k);
+ const id=+a;return b==='editar'?form(k,id):detail(k,id)}
+addEventListener('hashchange',route);route();
+</script></body></html>
