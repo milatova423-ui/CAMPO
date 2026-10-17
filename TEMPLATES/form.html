@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block body %}
+<h2>{{ 'Editar' if obj and obj.id else 'Nuevo' }} · {{ e.titulo }}</h2>
+<form method="post" class="card"><div class="grid">
+{% for n,l,t in e.campos %}{% set v = obj[n] if obj else None %}<div {% if t=='textarea' %}style="grid-column:1/-1"{% endif %}><label>{{ l }}</label>
+{% if t=='textarea' %}<textarea name="{{n}}" rows="3">{{ v or '' }}</textarea>
+{% elif t.startswith('select:') %}<select name="{{n}}"><option value=""></option>
+{% for o in t[7:].split(',') %}<option {{ 'selected' if v==o }}>{{ o }}</option>{% endfor %}</select>
+{% elif t=='date' %}<input type="date" name="{{n}}" value="{{ v.isoformat() if v else '' }}">
+{% elif t=='number' %}<input type="number" step="any" name="{{n}}" value="{{ v if v is not none else '' }}">
+{% else %}<input name="{{n}}" value="{{ v or '' }}">{% endif %}</div>{% endfor %}
+</div><p class="row"><button>Guardar</button><a class="btn sec" href="{{ url_for('listado',k=k) }}">Cancelar</a></p></form>
+{% endblock %}

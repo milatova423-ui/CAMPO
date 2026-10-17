@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block body %}
+<div class="row" style="justify-content:space-between"><h2>{{ e.titulo }}</h2>
+<div class="row"><a class="btn" href="{{ url_for('formulario',k=k) }}">+ Nuevo</a>
+<a class="btn sec" href="{{ url_for('importar',k=k) }}">Importar Excel</a>
+<a class="btn sec" href="{{ url_for('exportar',k=k) }}">Exportar Excel</a></div></div>
+<form class="card row"><input name="q" value="{{ q }}" placeholder="Buscar..." style="max-width:360px"><button>Buscar</button></form>
+<div class="card scroll"><table><tr><th>#</th>{% for n,l,t in e.campos %}<th>{{ l }}</th>{% endfor %}<th>Adj.</th></tr>
+{% for r in filas %}<tr><td><a href="{{ url_for('detalle',k=k,rid=r.id) }}">{{ r.id }}</a></td>
+{% for n,l,t in e.campos %}<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis">{{ r[n]|fmt }}</td>{% endfor %}
+<td>{{ adj.get(r.id,0) }}</td></tr>
+{% else %}<tr><td>No hay registros.</td></tr>{% endfor %}</table></div>
+{% endblock %}

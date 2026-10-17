@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block body %}
+<div class="row" style="justify-content:space-between"><h2>{{ e.titulo }} #{{ obj.id }}</h2><div class="row">
+<a class="btn" href="{{ url_for('formulario',k=k,rid=obj.id) }}">Editar</a>
+<form method="post" action="{{ url_for('eliminar',k=k,rid=obj.id) }}" onsubmit="return confirm('¿Eliminar registro y sus archivos?')"><button class="del">Eliminar</button></form></div></div>
+<div class="card"><table>{% for n,l,t in e.campos %}<tr><th>{{ l }}</th><td style="white-space:normal">{{ obj[n]|fmt }}</td></tr>{% endfor %}</table></div>
+<div class="card"><h3>Documentos y fotos</h3>
+<form method="post" action="{{ url_for('subir',k=k,rid=obj.id) }}" enctype="multipart/form-data" class="grid">
+<div><label>Tipo</label><select name="tipo">{% for t in TIPOS_ARCHIVO %}<option>{{ t }}</option>{% endfor %}</select></div>
+<div><label>Archivos (fotos, PDF, Word, Excel)</label><input type="file" name="archivos" multiple required accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"></div>
+<div><label>Nota</label><input name="nota"></div><div style="align-self:end"><button>Subir</button></div></form></div>
+<div class="gal">{% for a in archivos %}<div class="card">
+{% if a.es_imagen %}<a href="{{ url_for('ver_archivo',aid=a.id) }}" target="_blank"><img src="{{ url_for('ver_archivo',aid=a.id) }}" alt="{{ a.nombre }}"></a>
+{% else %}<a href="{{ url_for('ver_archivo',aid=a.id) }}">📄 {{ a.nombre }}</a>{% endif %}
+<p><b>{{ a.tipo }}</b><br><small>{{ a.nota or '' }} · {{ a.subido.strftime('%d/%m/%Y') }}</small></p>
+<form method="post" action="{{ url_for('quitar_archivo',aid=a.id) }}" onsubmit="return confirm('¿Quitar archivo?')"><button class="del">Quitar</button></form></div>
+{% endfor %}</div>{% endblock %}
