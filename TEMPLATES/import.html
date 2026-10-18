@@ -1,7 +1,0 @@
-{% extends "base.html" %}{% block body %}
-<h2>Importar Excel · {{ e.titulo }}</h2>
-<form method="post" enctype="multipart/form-data" class="card">
-<p>Sube un .xlsx cuya primera hoja tenga estos encabezados (el orden no importa; se detecta la fila de títulos automáticamente):</p>
-<p><small>{{ e.campos|map(attribute=1)|join(' · ') }}</small></p>
-<input type="file" name="excel" accept=".xlsx" required><p><button>Importar</button></p></form>
-{% endblock %}
