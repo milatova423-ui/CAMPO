@@ -465,7 +465,7 @@ function vDoc(){
   const rows=all.filter(d=>(!f.c||d.categoria===f.c)&&(!q||[d.nombre,d.descripcion,d.categoria].join(' ').toLowerCase().includes(q)));
   return head('Documentos y fotos','Archivos del programa de residuos. Se guardan de forma privada y solo los ve quien tenga acceso a esta página.',`<button class="btn pri" data-act="upload">+ Subir archivos</button>`)+`
   ${!assets&&mode==='db'?'<p class="mut">Tu nivel de acceso no permite subir archivos; puedes ver y descargar los existentes.</p>':''}
-  ${mode==='local'?'<p class="mut">Versión descargable: los archivos se guardan en este navegador (máx. 20 MB cada uno).</p>':''}
+  ${mode==='local'?'<p class="mut">Versión descargable: los archivos se guardan en este navegador (sin límite fijo: depende del espacio libre de tu equipo).</p>':''}
   <div class="chips" role="group" aria-label="Categorías"><button class="chip" data-cat="" aria-pressed="${!f.c}">Todos<small>${all.length}</small></button>${L.docCat.map(c=>`<button class="chip" data-cat="${c}" aria-pressed="${f.c===c}">${c}<small>${cnt(c)}</small></button>`).join('')}</div>
   <div class="tools"><input type="search" id="q-doc" placeholder="Buscar por nombre o descripción…" value="${esc(f.q)}" aria-label="Buscar"></div>
   ${rows.length?`<div class="gal">${rows.map(d=>{const img=(d.tipo||'').startsWith('image/');const ext=(d.nombreArchivo||'').split('.').pop().slice(0,4).toUpperCase()||'ARCH';
@@ -545,7 +545,7 @@ function formRep(v,edit){
     <div><button type="button" class="btn sm" data-act="additem">+ Agregar ítem</button></div>
     <div class="sec">Fotos y anexos</div>
     <label class="f">Agregar fotos o archivos (fotos, PDF, Word, Excel)<input id="f-axfiles" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"></label>
-    <p class="mut" style="margin:0">Las fotos se reducen automáticamente para ahorrar espacio. Otros archivos: máximo ${assets?20:5} MB cada uno.</p>
+    <p class="mut" style="margin:0">Las fotos se reducen automáticamente para ahorrar espacio. Otros archivos: ${assets?'máximo 20 MB cada uno':'sin límite fijo (depende del espacio libre de tu equipo)'}.</p>
     <div id="ax-list"></div>`,v.id,edit);
   axList();
   $('#frm').onsubmit=async e=>{e.preventDefault();if(!$('#frm').reportValidity())return;
@@ -2141,7 +2141,7 @@ render=function(){_r3();const m=ipxActive();if(!m)return;const rows=rowsOf(m.id)
      más reciente y no se borra nada. Antes de escribir se guarda un respaldo diario en Drive (carpeta respaldos/).
    - Reutiliza el motor de sincronización v13 (mismas reglas de unión, borrados y archivos). */
 if(LOCAL)(()=>{
-const GD_CID='';                       /* opcional: pega aquí tu ID de cliente OAuth para no escribirlo en cada equipo */
+const GD_CID='548406313962-290qnvu45opio9ap8o3kgerg29gbcnuk.apps.googleusercontent.com';                       /* opcional: pega aquí tu ID de cliente OAuth para no escribirlo en cada equipo */
 const FOLDER_NAME='Gestión de Residuos',FOLDER_MIME='application/vnd.google-apps.folder';
 const SCOPE='https://www.googleapis.com/auth/drive';
 const API='https://www.googleapis.com/drive/v3',UP='https://www.googleapis.com/upload/drive/v3';
@@ -2340,6 +2340,103 @@ if(G.cid&&ls('gd-on')){G.st='wait';G.msg='Verificando tu sesión de Google…'}
 gateUpd();
 /* reconexión silenciosa si ya había iniciado sesión antes */
 if(G.cid&&ls('gd-on')){window.addEventListener('load',()=>setTimeout(async()=>{try{G.email=ls('gd-email')||'';await window.READY;await connect(false)}catch(e){}},1200))}
+})();
+
+/* ====== v18 · GUARDADO DIRECTO EN CARPETAS DEL EQUIPO + MÁS CAPACIDAD ======
+   - Elige una carpeta una vez: PDF, Excel, Word, mapas, respaldos y documentos se guardan ahí directo, ordenados por módulo y con su nombre exacto.
+   - Si ya existe un archivo con ese nombre, se reemplaza (el nombre nunca cambia a "archivo (1)").
+   - Documentos, importados y anexos de reportes se copian a la carpeta con su nombre original.
+   - Anexos de reportes sin tope de 20 MB (los que no son foto se guardan aparte, no dentro del registro).
+   - Medidor de espacio y almacenamiento persistente del navegador. Todo es aditivo: no cambia datos ni pantallas existentes. */
+(()=>{
+if(!LOCAL)return;
+const CAN=typeof window.showDirectoryPicker==='function';
+let OUT=null,NEED=null,MIR=new Set(),mt=0,mbusy=false,capT='';
+try{MIR=new Set(JSON.parse(localStorage.getItem('v18-esp')||'[]'))}catch(_){}
+const sane=s=>String(s||'').replace(/[\\\/:*?"<>|\u0000-\u001f]+/g,'_').replace(/[. ]+$/,'').trim()||'archivo';
+const real=()=>typeof FileSystemDirectoryHandle!=='undefined'&&DIR instanceof FileSystemDirectoryHandle;
+const ROOT=()=>OUT||(real()?DIR:null);
+const putH=h=>idb(['blob'],'readwrite',t=>t.objectStore('blob').put(h,'__out'));
+const getH=async()=>{const r=await idb(['blob'],'readonly',t=>t.objectStore('blob').get('__out'));return r&&r.result};
+async function sub(root,path){let d=root;for(const p of String(path).split('/').filter(Boolean))d=await d.getDirectoryHandle(sane(p),{create:true});return d}
+const AREA=n=>{
+  if(/^Reporte_diario/i.test(n))return'Reportes diarios';
+  if(/^Informe_integral/i.test(n))return'Informes';
+  if(/^(IPERC|plantilla_matriz_iperc)/i.test(n))return'Matriz IPERC';
+  if(/^mapa/i.test(n))return'Mapas';
+  if(/^respaldo/i.test(n))return'Respaldos';
+  const m=Object.values(XT).find(x=>n.startsWith(slug(x.t)+'_'));
+  return m?sane(m.t):'Otros archivos'};
+const fm=b=>b>=1073741824?(b/1073741824).toFixed(1)+' GB':kb(b);
+async function capUpd(){try{const e=await navigator.storage.estimate();capT='Espacio del navegador: '+fm(e.usage||0)+' usados de '+fm(e.quota||0)}catch(_){capT=''}}
+function ui(){const s=document.querySelector('.side');if(!s)return;let b=document.getElementById('v18-out'),c=document.getElementById('v18-cap');
+  if(!b){b=document.createElement('button');b.id='v18-out';b.className='btn sm';b.style.cssText='margin:8px;width:calc(100% - 16px);white-space:normal';b.dataset.act='v18out';
+    c=document.createElement('div');c.id='v18-cap';c.style.cssText='margin:0 8px 8px;padding:0 8px;font-size:11px;color:var(--side-muted)';
+    const a=document.getElementById('v13-chip');
+    if(a&&a.parentNode===s){a.after(b);b.after(c)}else{const cr=s.querySelector('.cr-side');if(cr){s.insertBefore(b,cr);s.insertBefore(c,cr)}else{s.appendChild(b);s.appendChild(c)}}}
+  b.textContent=!CAN?'Guardado directo: usa Chrome o Edge':OUT?'● Guardando en: '+OUT.name:NEED?'Reconectar carpeta de guardado (clic)':real()?'● Guardando en la carpeta sincronizada':'Elegir carpeta para guardar mis archivos';
+  b.title='PDF, Excel, Word, mapas, respaldos y documentos se guardan directo en esa carpeta del equipo, por módulo y con su nombre exacto (si ya existe, se reemplaza el del mismo nombre). Clic para elegir o cambiar la carpeta.';
+  if(c)c.textContent=capT}
+const _r18=render;render=function(){_r18();ui()};
+
+/* ---------- guardado directo ---------- */
+const _sb=saveBlob;
+async function ensure(){if(OUT)return true;if(NEED){try{if(await NEED.requestPermission({mode:'readwrite'})==='granted'){OUT=NEED;NEED=null;ui();return true}}catch(_){}}return false}
+saveBlob=async function(name,blob,folder){
+  try{
+    const root=ROOT()||((await ensure())?OUT:null);
+    if(root){const n=sane(name),fo=folder||AREA(n),d=await sub(root,fo),w=await(await d.getFileHandle(n,{create:true})).createWritable();
+      await w.write(blob);await w.close();toast('Guardado en '+(root.name||'carpeta')+' / '+fo+' / '+n);return}
+  }catch(e){if(e&&e.name==='AbortError')return;console.warn('guardado directo',e);
+    if(e&&(e.name==='NotAllowedError'||e.name==='SecurityError')&&OUT){NEED=OUT;OUT=null;ui()}}
+  return _sb(name,blob)};
+const _d18=download;
+download=async function(id){const d=find('documentos',id);if(d&&d.blobId){const b=await getBlob(d.blobId);if(!b){toast('Archivo no encontrado');return}return saveBlob(d.nombreArchivo||d.nombre,b,'Documentos/'+sane(d.categoria||'Sin categoría'))}return _d18(id)};
+
+/* ---------- copia con nombre original: documentos, importados y anexos de reportes ---------- */
+async function mirror(){const root=ROOT();if(!root||mbusy)return;mbusy=true;
+  try{const it=[];
+    S.documentos.forEach(r=>it.push([r.blobId,r.nombreArchivo||r.nombre,'Documentos/'+(r.categoria||'Sin categoría')]));
+    (S.imp||[]).forEach(r=>it.push([r.blobId,r.nombreArchivo||r.nombre,'Archivos importados/'+(r.modulo||'')]));
+    S.reportes.forEach(r=>(r.anexos||[]).forEach(a=>it.push([a.blobId||a.id,a.nombre,'Anexos de reportes/'+(r.fecha||'sin fecha'),a.blobId?'':a.url])));
+    let n=0;
+    for(const[id,nm,p,u]of it){if(!id||!nm||MIR.has(id))continue;
+      const b=u&&String(u).startsWith('data:')?await(await fetch(u)).blob():await getBlobL(id);if(!b)continue;
+      const d=await sub(root,p),f=sane(nm);let ex=true;await d.getFileHandle(f).catch(()=>{ex=false});
+      if(!ex){const w=await(await d.getFileHandle(f,{create:true})).createWritable();await w.write(b);await w.close();n++}MIR.add(id)}
+    try{localStorage.setItem('v18-esp',JSON.stringify([...MIR]))}catch(_){}
+    if(n)toast(n+' archivo'+(n>1?'s':'')+' copiado'+(n>1?'s':'')+' a tu carpeta con su nombre original')
+  }catch(e){console.warn('copia a carpeta',e)}mbusy=false}
+const _af=window.afterFlush;
+window.afterFlush=function(){if(_af)_af();clearTimeout(mt);mt=setTimeout(async()=>{mirror();await capUpd();ui()},2500)};
+
+document.addEventListener('click',async e=>{const t=e.target.closest&&e.target.closest('[data-act="v18out"]');if(!t)return;
+  if(!CAN){toast('Usa Chrome o Edge para guardar directo en carpetas');return}
+  try{if(NEED&&!OUT){if(await NEED.requestPermission({mode:'readwrite'})==='granted'){OUT=NEED;NEED=null;ui();toast('Carpeta reconectada: '+OUT.name);mirror();return}}
+    const h=await showDirectoryPicker({mode:'readwrite',id:'residuos-guardado'});OUT=h;NEED=null;await putH(h);ui();toast('Tus archivos se guardarán en: '+h.name);mirror()}
+  catch(err){if(err&&err.name!=='AbortError')toast('No se pudo usar esa carpeta: '+(err.message||'permiso denegado'))}});
+document.addEventListener('click',()=>{try{navigator.storage.persisted().then(p=>{if(!p)navigator.storage.persist()})}catch(_){}},{once:true});
+
+/* ---------- anexos de reportes sin tope de 20 MB ---------- */
+addAnexos=async function(files){
+  for(const fl of files){
+    try{let blob=fl,nombre=fl.name,tipo=fl.type||'',url='',bid='',inl=false;
+      if(tipo.startsWith('image/')&&tipo!=='image/gif'&&tipo!=='image/svg+xml'){try{blob=await shrink(fl);nombre=fl.name.replace(/\.[^.]+$/,'')+'.jpg';tipo='image/jpeg';url=await rdURL(blob);inl=true}catch(_){blob=fl;nombre=fl.name;tipo='application/octet-stream'}}
+      if(!inl){bid=newId();await putBlob(bid,blob);url='#blob:'+bid;if(!tipo)tipo='application/octet-stream'}
+      AX.push({id:newId(),nombre,tipo,tamano:blob.size,url,assetId:'',blobId:bid,desc:''});
+    }catch(err){toast('No se pudo agregar '+fl.name+': '+(err&&err.message||'sin espacio'))}
+    axList()}};
+document.addEventListener('click',async e=>{const a=e.target.closest&&e.target.closest('a[href^="#blob:"]');if(!a)return;e.preventDefault();e.stopPropagation();
+  const b=await getBlob(a.getAttribute('href').slice(6));if(!b){toast('Archivo no encontrado en este equipo');return}
+  saveBlob(a.getAttribute('download')||'archivo',b,'Anexos de reportes')},true);
+dirFiles=async function(){
+  const ids=[...S.documentos,...(S.imp||[]),...S.reportes.flatMap(r=>r.anexos||[])].map(r=>r.blobId).filter(id=>id&&!PUSHED.has(id));if(!ids.length)return;
+  const d=await DIR.getDirectoryHandle('archivos',{create:true});
+  for(const id of ids){let ok=true;await d.getFileHandle(id).catch(()=>{ok=false});
+    if(!ok){const b=await getBlobL(id);if(!b)continue;const w=await(await d.getFileHandle(id,{create:true})).createWritable();await w.write(b);await w.close()}PUSHED.add(id)}};
+
+/* ---------- arranque ---------- */
+(async()=>{try{await window.READY;const h=await getH();if(h){if(await h.queryPermission({mode:'readwrite'})==='granted'){OUT=h;mirror()}else NEED=h}}catch(_){}await capUpd();ui()})();
 })();
 
 render();boot();
