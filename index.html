@@ -2157,7 +2157,7 @@ function auth(prompt){return new Promise(async(ok,no)=>{try{await loadJS('https:
   if(!G.tc||G.tcId!==G.cid){G.tcId=G.cid;G.tc=google.accounts.oauth2.initTokenClient({client_id:G.cid,scope:SCOPE,
     callback:r=>{if(r.error)return G.cb&&G.cb.no(new Error(r.error_description||r.error));G.tok=r.access_token;G.exp=Date.now()+(r.expires_in-90)*1000;G.cb&&G.cb.ok(G.tok)},
     error_callback:e=>G.cb&&G.cb.no(new Error('Inicio de sesión cancelado o bloqueado ('+(e.type||'error')+')'))})}
-  G.cb={ok,no};G.tc.requestAccessToken({prompt,login_hint:G.email||undefined})})}
+  G.cb={ok,no};setTimeout(()=>no(new Error('Google no respondió: pulsa «Iniciar sesión con Google» (si el navegador bloqueó la ventana emergente, permítela)')),prompt?120000:10000);G.tc.requestAccessToken({prompt,login_hint:G.email||undefined})})}
 const token=async()=>G.tok&&Date.now()<G.exp?G.tok:auth('');
 async function gf(url,opt={},raw){let t=await token();const h=()=>({...(opt.headers||{}),Authorization:'Bearer '+t});let r=await fetch(url,{...opt,headers:h()});
   if(r.status===401){G.tok='';t=await token();r=await fetch(url,{...opt,headers:h()})}
@@ -2374,7 +2374,8 @@ function ui(){const s=document.querySelector('.side');if(!s)return;let b=documen
     c=document.createElement('div');c.id='v18-cap';c.style.cssText='margin:0 8px 8px;padding:0 8px;font-size:11px;color:var(--side-muted)';
     const a=document.getElementById('v13-chip');
     if(a&&a.parentNode===s){a.after(b);b.after(c)}else{const cr=s.querySelector('.cr-side');if(cr){s.insertBefore(b,cr);s.insertBefore(c,cr)}else{s.appendChild(b);s.appendChild(c)}}}
-  b.textContent=!CAN?'Guardado directo: usa Chrome o Edge':OUT?'● Guardando en: '+OUT.name:NEED?'Reconectar carpeta de guardado (clic)':real()?'● Guardando en la carpeta sincronizada':'Elegir carpeta para guardar mis archivos';
+  const tx=!CAN?'Guardado directo: usa Chrome o Edge':OUT?'● Guardando en: '+OUT.name:NEED?'Reconectar carpeta de guardado (clic)':real()?'● Guardando en la carpeta sincronizada':'Elegir carpeta para guardar mis archivos';
+  document.querySelectorAll('[data-act="v18out"]').forEach(x=>{x.textContent=tx});
   b.title='PDF, Excel, Word, mapas, respaldos y documentos se guardan directo en esa carpeta del equipo, por módulo y con su nombre exacto (si ya existe, se reemplaza el del mismo nombre). Clic para elegir o cambiar la carpeta.';
   if(c)c.textContent=capT}
 const _r18=render;render=function(){_r18();ui()};
@@ -2393,20 +2394,70 @@ saveBlob=async function(name,blob,folder){
 const _d18=download;
 download=async function(id){const d=find('documentos',id);if(d&&d.blobId){const b=await getBlob(d.blobId);if(!b){toast('Archivo no encontrado');return}return saveBlob(d.nombreArchivo||d.nombre,b,'Documentos/'+sane(d.categoria||'Sin categoría'))}return _d18(id)};
 
-/* ---------- copia con nombre original: documentos, importados y anexos de reportes ---------- */
-async function mirror(){const root=ROOT();if(!root||mbusy)return;mbusy=true;
-  try{const it=[];
-    S.documentos.forEach(r=>it.push([r.blobId,r.nombreArchivo||r.nombre,'Documentos/'+(r.categoria||'Sin categoría')]));
-    (S.imp||[]).forEach(r=>it.push([r.blobId,r.nombreArchivo||r.nombre,'Archivos importados/'+(r.modulo||'')]));
-    S.reportes.forEach(r=>(r.anexos||[]).forEach(a=>it.push([a.blobId||a.id,a.nombre,'Anexos de reportes/'+(r.fecha||'sin fecha'),a.blobId?'':a.url])));
-    let n=0;
-    for(const[id,nm,p,u]of it){if(!id||!nm||MIR.has(id))continue;
-      const b=u&&String(u).startsWith('data:')?await(await fetch(u)).blob():await getBlobL(id);if(!b)continue;
-      const d=await sub(root,p),f=sane(nm);let ex=true;await d.getFileHandle(f).catch(()=>{ex=false});
-      if(!ex){const w=await(await d.getFileHandle(f,{create:true})).createWritable();await w.write(b);await w.close();n++}MIR.add(id)}
+/* ---------- despachos: carpetas por despacho, copia con nombre original y ZIP ---------- */
+const DKEY='v18-desp',SIN='Sin despacho';
+const ls18=()=>{try{return localStorage.getItem(DKEY)||''}catch(_){return''}};
+const dOf=r=>String((r&&r.despacho)||'').trim();
+const despList=()=>[...new Set(['Despacho 1','Despacho 2','Despacho 3',...S.documentos.map(dOf),...S.reportes.map(dOf)].filter(Boolean))].sort((x,y)=>x.localeCompare(y,'es',{numeric:true}));
+function entries(){const it=[];
+  S.documentos.forEach(r=>it.push({k:r.blobId||r.id,nm:r.nombreArchivo||r.nombre,p:(dOf(r)||SIN)+'/'+(r.categoria||'Otros'),id:r.blobId,u:r.blobId?'':r.url}));
+  (S.imp||[]).forEach(r=>it.push({k:r.blobId,nm:r.nombreArchivo||r.nombre,p:'Archivos importados/'+(r.modulo||''),id:r.blobId,u:''}));
+  S.reportes.forEach(r=>(r.anexos||[]).forEach(a=>it.push({k:a.blobId||a.id,nm:a.nombre,p:(dOf(r)||SIN)+'/Anexos de reportes/'+(r.fecha||'sin fecha'),id:a.blobId,u:a.blobId?'':a.url})));
+  return it}
+const getFile=async x=>x.u&&String(x.u).startsWith('data:')?await(await fetch(x.u)).blob():(x.id?await getBlobL(x.id):null);
+async function mirror(show){const root=ROOT();if(!root||mbusy)return;mbusy=true;let n=0;
+  try{for(const x of entries()){const key=x.k+'|'+x.p;if(!x.k||!x.nm||MIR.has(key))continue;
+      const b=await getFile(x);if(!b)continue;
+      const d=await sub(root,x.p),f=sane(x.nm);let ex=true;await d.getFileHandle(f).catch(()=>{ex=false});
+      if(!ex){const w=await(await d.getFileHandle(f,{create:true})).createWritable();await w.write(b);await w.close();n++}MIR.add(key)}
     try{localStorage.setItem('v18-esp',JSON.stringify([...MIR]))}catch(_){}
-    if(n)toast(n+' archivo'+(n>1?'s':'')+' copiado'+(n>1?'s':'')+' a tu carpeta con su nombre original')
-  }catch(e){console.warn('copia a carpeta',e)}mbusy=false}
+    if(n)toast(n+' archivo'+(n>1?'s':'')+' copiado'+(n>1?'s':'')+' a tu carpeta, ordenados por despacho');else if(show===true)toast('Todo ya estaba copiado en tu carpeta')
+  }catch(e){console.warn('copia a carpeta',e);if(show===true)toast('No se pudo copiar: '+(e&&e.message||'revisa el permiso de la carpeta'))}mbusy=false}
+async function zipAll(){const sel=F.doc.d||'',list=entries().filter(x=>!sel||x.p.split('/')[0]===sel);
+  if(!list.length){toast('No hay archivos para comprimir');return}
+  try{toast('Preparando ZIP…');await loadJS(JSZ);const z=new window.JSZip(),used=new Set();let n=0;
+    const uniq=p=>{let q=p,k=2;while(used.has(q.toLowerCase())){q=p.replace(/(\.[^./]*)?$/,' ('+(k++)+')$1')}used.add(q.toLowerCase());return q};
+    for(const x of list){const b=await getFile(x);if(!b||!x.nm)continue;z.file(uniq(x.p.split('/').map(sane).join('/')+'/'+sane(x.nm)),b);n++;if(n%10===0)toast('ZIP: '+n+' de '+list.length+' archivos…')}
+    if(!n){toast('No hay archivos disponibles en este equipo');return}
+    const blob=await z.generateAsync({type:'blob',compression:'STORE'});
+    await saveBlob('Documentos_'+slug(sel||'todos_los_despachos')+'_'+today()+'.zip',blob,'ZIP')
+  }catch(e){toast('No se pudo crear el ZIP: '+(e&&e.message||'error'))}}
+
+/* campo "Despacho" en subir archivos, editar archivo y reportes diarios */
+let CUR=null;
+const _fs=formShell;formShell=function(col,title,inner,id,edit,extra){CUR={col,id};return _fs(col,title,inner,id,edit,extra)};
+const dField=(col,val)=>`<label class="f full">Despacho (carpeta donde se guarda)<input id="f-despacho18" data-col="${col}" list="dl-desp18" value="${esc(val||'')}" placeholder="Ej. Despacho 1" autocomplete="off"></label><datalist id="dl-desp18">${despList().map(x=>`<option value="${esc(x)}">`).join('')}</datalist>`;
+const _md=modal;
+modal=function(title,body,foot,cls){
+  try{const c=CUR;CUR=null;
+    if(typeof body==='string'){const CAT='<label class="f">Categoría<select id="f-categoria">',AXS='<div class="sec">Fotos y anexos</div>';
+      if(body.includes(CAT)){const r=c&&c.col==='documentos'&&c.id?find('documentos',c.id):null;body=body.replace(CAT,dField('documentos',r?dOf(r):(F.doc.d&&F.doc.d!==SIN?F.doc.d:ls18()))+CAT)}
+      else if(body.includes(AXS)){const r=c&&c.col==='reportes'&&c.id?find('reportes',c.id):null;body=body.replace(AXS,dField('reportes',r?dOf(r):ls18())+AXS)}}
+  }catch(_){}
+  return _md(title,body,foot,cls)};
+const _sv=save;
+save=async function(col,rec){const e=document.getElementById('f-despacho18');
+  if(e&&e.dataset.col===col){const v=e.value.trim();rec={...rec,despacho:v};try{localStorage.setItem(DKEY,v)}catch(_){}}
+  return _sv(col,rec)};
+
+/* pantalla Documentos: filtro por despacho, etiqueta en cada archivo, carpeta del equipo y ZIP */
+const _vd18=vDoc;
+vDoc=function(){const all=S.documentos,sel=F.doc.d||'';
+  S.documentos=sel?(sel===SIN?all.filter(d=>!dOf(d)):all.filter(d=>dOf(d)===sel)):all;
+  let h;try{h=_vd18()}finally{S.documentos=all}
+  const A='<article class="panel file">';
+  h=h.split(A).map((c,i)=>{if(!i)return c;const m=c.match(/data-act="prev:([^"]+)"/),d=m&&all.find(x=>x.id===m[1]);
+    return A+(d?c.replace('<span class="tag">','<span class="tag" style="background:var(--accent-soft)">'+esc(dOf(d)||SIN)+'</span> <span class="tag">'):c)}).join('');
+  const names=despList(),cn=n=>all.filter(d=>dOf(d)===n).length,nin=all.filter(d=>!dOf(d)).length;
+  const bar=`<div class="panel card" style="margin:10px 0;display:grid;gap:10px"><div class="chips" role="group" aria-label="Despachos"><button class="chip" data-desp="" aria-pressed="${!sel}">Todos los despachos<small>${all.length}</small></button>${names.map(n=>`<button class="chip" data-desp="${esc(n)}" aria-pressed="${sel===n}">${esc(n)}<small>${cn(n)}</small></button>`).join('')}${nin?`<button class="chip" data-desp="${SIN}" aria-pressed="${sel===SIN}">${SIN}<small>${nin}</small></button>`:''}</div>
+  <div class="tools" style="margin:0"><button class="btn sm pri" data-act="v18out">Elegir carpeta del equipo</button><button class="btn sm" data-act="v18sync">Copiar todo a la carpeta</button><button class="btn sm" data-act="v18zip">Descargar ZIP · ${esc(sel||'todos los despachos')}</button></div>
+  <p class="mut" style="margin:0;font-size:12px">Al subir o editar un archivo escribe su despacho (Despacho 1, Despacho 2…). En la carpeta del equipo queda así: <b>Despacho 1 / Fotos / archivo.jpg</b>. El ZIP trae la misma estructura.</p></div>`;
+  const K='<div class="chips" role="group" aria-label="Categorías">';
+  return h.includes(K)?h.replace(K,bar+K):h+bar};
+document.addEventListener('click',async e=>{
+  const c=e.target.closest&&e.target.closest('[data-desp]');if(c){F.doc.d=c.dataset.desp;render();return}
+  if(e.target.closest&&e.target.closest('[data-act="v18zip"]')){zipAll();return}
+  if(e.target.closest&&e.target.closest('[data-act="v18sync"]')){if(!ROOT()){toast('Primero pulsa «Elegir carpeta del equipo»');return}await mirror(true)}});
 const _af=window.afterFlush;
 window.afterFlush=function(){if(_af)_af();clearTimeout(mt);mt=setTimeout(async()=>{mirror();await capUpd();ui()},2500)};
 
@@ -2434,6 +2485,17 @@ dirFiles=async function(){
   const d=await DIR.getDirectoryHandle('archivos',{create:true});
   for(const id of ids){let ok=true;await d.getFileHandle(id).catch(()=>{ok=false});
     if(!ok){const b=await getBlobL(id);if(!b)continue;const w=await(await d.getFileHandle(id,{create:true})).createWritable();await w.write(b);await w.close()}PUSHED.add(id)}};
+
+/* ---------- mapa: refuerzo para que siempre se vea ---------- */
+const _im18=initMap;
+initMap=async function(){
+  await _im18();
+  const el=document.getElementById('map');if(!el)return;
+  [250,900,2500].forEach(t=>setTimeout(()=>{try{if(GMAP)GMAP.invalidateSize()}catch(_){}},t));
+  try{if(el.classList.contains('leaflet-container')&&getComputedStyle(el).position==='static'&&!document.getElementById('v18-lcss')){const l=document.createElement('link');l.id='v18-lcss';l.rel='stylesheet';l.href='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css';document.head.appendChild(l)}}catch(_){}
+  setTimeout(()=>{try{const m=document.getElementById('map');if(!m||!window.L||!GMAP||m.querySelector('.leaflet-tile-loaded'))return;
+    window.L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:20,attribution:'© OpenStreetMap contributors © CARTO'}).addTo(GMAP).bringToBack();
+    toast('El satélite no cargó: se activó el mapa de calles. Puedes cambiar de capa con el control del mapa')}catch(_){}},8000)};
 
 /* ---------- arranque ---------- */
 (async()=>{try{await window.READY;const h=await getH();if(h){if(await h.queryPermission({mode:'readwrite'})==='granted'){OUT=h;mirror()}else NEED=h}}catch(_){}await capUpd();ui()})();
