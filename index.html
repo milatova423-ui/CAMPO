@@ -2404,6 +2404,7 @@ function entries(){const it=[];
   S.documentos.forEach(r=>it.push({k:r.blobId||r.id,nm:r.nombreArchivo||r.nombre,p:(dOf(r)||SIN)+'/'+(r.categoria||'Otros'),id:r.blobId,u:r.blobId?'':r.url}));
   (S.imp||[]).forEach(r=>it.push({k:r.blobId,nm:r.nombreArchivo||r.nombre,p:'Archivos importados/'+(r.modulo||''),id:r.blobId,u:''}));
   S.reportes.forEach(r=>(r.anexos||[]).forEach(a=>it.push({k:a.blobId||a.id,nm:a.nombre,p:(dOf(r)||SIN)+'/Anexos de reportes/'+(r.fecha||'sin fecha'),id:a.blobId,u:a.blobId?'':a.url})));
+  (S.anexosmod||[]).forEach(r=>it.push({k:r.blobId||r.id,nm:r.nombre,p:(dOf(r)||SIN)+(r.plan?'/Plan de trabajo/'+r.plan:'/Anexos de módulos/'+(r.modulo||'General')),id:r.blobId,u:''}));
   return it}
 const getFile=async x=>x.u&&String(x.u).startsWith('data:')?await(await fetch(x.u)).blob():(x.id?await getBlobL(x.id):null);
 async function mirror(show){const root=ROOT();if(!root||mbusy)return;mbusy=true;let n=0;
@@ -2482,7 +2483,7 @@ document.addEventListener('click',async e=>{const a=e.target.closest&&e.target.c
   const b=await getBlob(a.getAttribute('href').slice(6));if(!b){toast('Archivo no encontrado en este equipo');return}
   saveBlob(a.getAttribute('download')||'archivo',b,'Anexos de reportes')},true);
 dirFiles=async function(){
-  const ids=[...S.documentos,...(S.imp||[]),...S.reportes.flatMap(r=>r.anexos||[])].map(r=>r.blobId).filter(id=>id&&!PUSHED.has(id));if(!ids.length)return;
+  const ids=[...S.documentos,...(S.imp||[]),...S.reportes.flatMap(r=>r.anexos||[]),...(S.anexosmod||[])].map(r=>r.blobId).filter(id=>id&&!PUSHED.has(id));if(!ids.length)return;
   const d=await DIR.getDirectoryHandle('archivos',{create:true});
   for(const id of ids){let ok=true;await d.getFileHandle(id).catch(()=>{ok=false});
     if(!ok){const b=await getBlobL(id);if(!b)continue;const w=await(await d.getFileHandle(id,{create:true})).createWritable();await w.write(b);await w.close()}PUSHED.add(id)}};
@@ -2585,6 +2586,295 @@ function utmUI(map){const Lf=window.L;if(!Lf||map._v19)return;map._v19=1;
 const _ig=initGeo;initGeo=function(map,pts){_ig(map,pts);try{utmUI(map)}catch(e){console.warn('UTM',e)}};
 try{const g=XT.geo;if(g&&!g.v19){g.v19=1;const h0=g.h,r0=g.r;g.h=[...h0,'Zona UTM (WGS84)','Hemisferio','Este UTM (m)','Norte UTM (m)'];
   g.r=()=>{const gs=sorted('geo');return r0().map((row,i)=>{const c=gs[i]?geoCen(gs[i]):null;if(!c||c[0]===''||c[0]==null)return[...row,'','','',''];const u=ll2utm(+c[0],+c[1]);return[...row,u.zn+u.band,u.south?'Sur':'Norte',Math.round(u.E),Math.round(u.N)]})}}}catch(e){console.warn(e)}
+})();
+
+/* ====== v20 · MÓDULOS NUEVOS: CÁLCULOS (lluvia, metrados, zonas del ATR) Y CRONOGRAMA Y CONTROL ======
+   Cálculos: captación de lluvia, estimación de metrados (con la tabla de ECCAN) y capacidad de almacenamiento por zona del ATR.
+   Cronograma y control: diagrama de Gantt, hitos de control, indicadores de control y anexos de documentación por módulo.
+   Todo es aditivo: agrega pantallas y colecciones nuevas, sin tocar las existentes. */
+(()=>{
+['calculos','cronograma','hitos','indicadores','anexosmod'].forEach(k=>{if(!S[k])S[k]=[]});
+ICON.cal='<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 12h2M14 12h2M8 16h2M14 16h2"/>';
+ICON.cro='<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M7 13h6M10 17h7"/>';
+if(!VIEWS.some(v=>v[0]==='cal'))VIEWS.splice(6,0,['cal','Cálculos','calculos'],['cro','Cronograma y control','cronograma']);
+try{const h=location.hash.slice(1);if(h==='cal'||h==='cro')view=h}catch(_){}
+const LOC=typeof LOCAL!=='undefined'&&LOCAL,SIN='Sin despacho';
+const W=()=>typeof canWrite==='undefined'||canWrite;
+const num=v=>{const x=parseFloat(String(v==null?'':v).replace(',','.'));return Number.isFinite(x)?x:NaN};
+const v0=x=>Number.isFinite(x)?x:0;
+const f2=(v,d=2)=>Number.isFinite(v)?v.toLocaleString('es-PE',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
+const ce=Math.ceil,PI=Math.PI;
+const dOf=r=>String((r&&r.despacho)||'').trim();
+const despNames=()=>[...new Set(['Despacho 1','Despacho 2','Despacho 3',...['documentos','reportes','cronograma','hitos','indicadores','anexosmod','calculos'].flatMap(c=>(S[c]||[]).map(dOf))].filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es',{numeric:true}));
+
+/* ---------- estilos ---------- */
+const st=document.createElement('style');st.textContent=`
+.v20in{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;padding:14px}
+.v20in .sec,.v20sec{grid-column:1/-1;font:600 12px var(--f-body);letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-top:4px}
+.v20hint{font-size:12px;color:var(--muted);padding:0 14px 12px;margin:0}
+.v20two{display:grid;grid-template-columns:minmax(0,1fr);gap:14px}
+@media(min-width:1100px){.v20two.s{grid-template-columns:minmax(300px,380px) minmax(0,1fr)}}
+.v20ov{position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.55);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto}
+.v20dg{width:min(640px,100%);padding:18px;margin-block:auto}.v20dg h3{margin:0 0 12px;font:600 18px var(--f-display)}
+.v20bt{display:flex;gap:8px;justify-content:flex-end;margin-top:14px}
+.v20g{overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.v20r{display:flex;min-width:max-content;border-bottom:1px solid var(--line)}
+.v20r.h{position:sticky;top:0;z-index:3;background:var(--surface2)}
+.v20gl{position:sticky;left:0;z-index:2;flex:0 0 250px;width:250px;background:var(--surface);padding:6px 10px;font-size:12.5px;border-right:1px solid var(--line);overflow:hidden}
+.v20r.h .v20gl{background:var(--surface2)}
+.v20gt{position:relative;flex:0 0 auto;height:34px}.v20r.h .v20gt{height:26px}
+.v20m{position:absolute;top:0;height:100%;border-left:1px solid var(--line);font:600 11px var(--f-body);padding:5px 6px;color:var(--muted);text-transform:uppercase;white-space:nowrap;overflow:hidden}
+.v20b{position:absolute;top:8px;height:18px;border-radius:4px;background:#8aa4c4;overflow:hidden;cursor:pointer;min-width:4px}
+.v20b i{display:block;height:100%;background:rgba(0,0,0,.28)}
+.v20b span{position:absolute;left:6px;top:0;font:600 11px/18px var(--f-mono);color:#fff;text-shadow:0 0 2px #000}
+.v20b.ok{background:#2e8b57}.v20b.late{background:#c0392b}.v20b.run{background:#2f6db5}.v20b.wait{background:#8a97a8}
+.v20d{position:absolute;top:9px;width:14px;height:14px;transform:rotate(45deg);margin-left:-7px;background:#d98e04;cursor:pointer}
+.v20d.ok{background:#2e8b57}.v20d.late{background:#c0392b}
+.v20td{position:absolute;top:0;bottom:0;width:2px;background:#e03131;opacity:.8;pointer-events:none}
+.v20sem{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+.v20sem.ok{background:#2e8b57}.v20sem.warn{background:#e0a100}.v20sem.bad{background:#c0392b}
+.v20in input,.v20in select,.v20t input{width:100%}.v20t input{min-width:62px;padding:5px 6px}
+`;document.head.appendChild(st);
+
+/* ---------- estado ---------- */
+let CS={};try{CS=JSON.parse(localStorage.getItem('v20-cs')||'{}')||{}}catch(_){}
+const DEF={
+  lluvia:{tipo:'techo',area:'',pend:'',ce:'0.9',perd:'',p24:'',inten:'',cap:'',meses:Array(12).fill('')},
+  metrado:{geo:'',A:'',P:'',franja:'',h:'',anc:'',solape:'',pteo:'',alero:'',hc:'',cierre:'100',esp:'',hint:'0',sep:'',rollo:'700',perd:''},
+  zonas:{atr:'',bbL:'',bbW:'',bbH:'',niv:'',bbT:'',rows:[
+    {n:'Zona de acopio de big bags',L:'',W:'',H:'',o:''},{n:'Zona de acondicionamiento de residuos',L:'',W:'',H:'',o:''},
+    {n:'Pasillo de circulación',L:'',W:'',H:'',o:''},{n:'Sumidero interior',L:'',W:'',H:'',o:''},
+    {n:'Zona de contingencia',L:'',W:'',H:'',o:''},{n:'Zona de manejo de EPP',L:'',W:'',H:'',o:''}]}};
+const cl=o=>JSON.parse(JSON.stringify(o));
+const sv=()=>{try{localStorage.setItem('v20-cs',JSON.stringify(CS))}catch(_){}};
+const C=t=>{const d=cl(DEF[t]),c=CS[t]||{};CS[t]={...d,...c};if(t==='lluvia'&&!Array.isArray(CS[t].meses))CS[t].meses=d.meses;if(t==='zonas'&&!Array.isArray(CS[t].rows))CS[t].rows=d.rows;return CS[t]};
+let TAB={cal:'lluvia',cro:'gantt'},ZOOM='semana',CF='',AXM='';
+const TABS={cal:[['lluvia','Captación de lluvia'],['metrado','Estimación de metrados'],['zonas','Zonas y almacenamiento del ATR']],
+  cro:[['gantt','Cronograma'],['hitos','Hitos de control'],['ind','Indicadores de control'],['anexos','Anexos por módulo']]};
+const tabsH=m=>`<div class="chips" role="tablist" style="margin-bottom:14px">${TABS[m].map(([k,t])=>`<button class="chip" role="tab" data-v20="tab" data-m="${m}" data-id="${k}" aria-pressed="${TAB[m]===k}">${t}</button>`).join('')}</div>`;
+const inp=(t,k,l,ph,extra)=>`<label class="f">${l}<input data-t="${t}" data-k="${k}" value="${esc(C(t)[k]??'')}" inputmode="decimal" placeholder="${esc(ph||'')}" autocomplete="off" ${extra||''}></label>`;
+const kpi=(l,b,f)=>`<div class="kpi" style="cursor:default"><span class="lb">${l}</span><span class="big">${b}</span><span class="ft">${f||''}</span></div>`;
+
+/* ---------- 1. captación de lluvia ---------- */
+const MES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+function rain(){const m=C('lluvia'),Ar=num(m.area),th=Math.atan(v0(num(m.pend))/100),Ah=m.tipo==='techo'?Ar*Math.cos(th):Ar,
+  ce_=num(m.ce),ef=ce_*(1-v0(num(m.perd))/100),p24=num(m.p24),it=num(m.inten),cap=num(m.cap);
+  const mm=Ah*ef/1000,evt=mm*p24,q=ce_*it*Ah/3600;
+  const meses=m.meses.map(x=>{const p=num(x);return{p,v:Number.isFinite(p)?mm*p:NaN}});
+  const tot=meses.reduce((a,x)=>a+(Number.isFinite(x.v)?x.v:0),0),ptot=meses.reduce((a,x)=>a+(Number.isFinite(x.p)?x.p:0),0);
+  return{Ah,ef,mm,evt,q,cap,meses,tot,ptot,haveM:meses.some(x=>Number.isFinite(x.p))}}
+function rainOut(){const r=rain();if(!Number.isFinite(r.Ah)||!Number.isFinite(r.ef))return'<p class="v20hint" style="padding:18px">Ingresa el <b>área de captación</b> y el <b>coeficiente de escorrentía</b> para ver los resultados.</p>';
+  const pc=Number.isFinite(r.cap)&&r.cap>0&&Number.isFinite(r.evt)?r.evt/r.cap*100:NaN;
+  return`<div class="kpis" style="padding:14px 14px 0">${kpi('Área horizontal efectiva',f2(r.Ah)+' m²','Proyección en planta que recibe la lluvia')}${kpi('Coeficiente efectivo',f2(r.ef,3),'Escorrentía × (1 − pérdidas)')}${kpi('Volumen por cada mm de lluvia',f2(r.mm,3)+' m³','= '+f2(r.mm*1000,1)+' L por mm')}
+  ${Number.isFinite(r.evt)?kpi('Volumen del evento de diseño (24 h)',f2(r.evt)+' m³',f2(r.evt*1000,0)+' L'+(Number.isFinite(pc)?' · '+f2(pc,1)+' % de la capacidad '+(pc>100?'(DESBORDA)':''):'')):''}
+  ${Number.isFinite(r.q)?kpi('Caudal pico (método racional)',f2(r.q,2)+' L/s',f2(r.q*3.6,2)+' m³/h'):''}</div>
+  ${r.haveM?`<div class="tw" style="padding:14px"><table style="min-width:420px"><thead><tr><th>Mes</th><th class="num">Precipitación (mm)</th><th class="num">Volumen captado (m³)</th></tr></thead><tbody>${r.meses.map((x,i)=>`<tr><td>${MES[i]}</td><td class="num">${Number.isFinite(x.p)?f2(x.p,1):'—'}</td><td class="num">${f2(x.v)}</td></tr>`).join('')}</tbody><tfoot><tr><td><b>Total</b></td><td class="num"><b>${f2(r.ptot,1)}</b></td><td class="num"><b>${f2(r.tot)}</b></td></tr></tfoot></table></div>`:'<p class="v20hint">Si ingresas la precipitación mensual (mm) verás el volumen captado por mes y por año.</p>'}`}
+function rainH(){const m=C('lluvia');return`<div class="v20two s"><div class="panel"><div class="v20in">
+  <div class="sec">Superficie de captación</div>
+  <label class="f">El área ingresada es<select data-t="lluvia" data-k="tipo"><option value="techo"${m.tipo==='techo'?' selected':''}>De techo inclinado</option><option value="plano"${m.tipo==='plano'?' selected':''}>Proyectada (en planta)</option></select></label>
+  ${inp('lluvia','area','Área (m²)','m²')}${m.tipo==='techo'?inp('lluvia','pend','Pendiente del techo (%)','%'):''}
+  <div class="sec">Eficiencia</div>${inp('lluvia','ce','Coef. de escorrentía','0.90')}${inp('lluvia','perd','Pérdidas / descarte inicial (%)','%')}
+  <div class="sec">Evento de diseño</div>${inp('lluvia','p24','Precipitación máx. en 24 h (mm)','mm')}${inp('lluvia','inten','Intensidad de diseño (mm/h)','mm/h')}${inp('lluvia','cap','Capacidad de tanque o sumidero (m³)','m³')}
+  <div class="sec">Precipitación mensual (mm)</div>${m.meses.map((x,i)=>`<label class="f">${MES[i]}<input data-t="lluvia" data-i="${i}" value="${esc(x)}" inputmode="decimal" placeholder="mm" autocomplete="off"></label>`).join('')}
+  </div><p class="v20hint">Volumen (m³) = precipitación (mm) × área horizontal (m²) × coeficiente efectivo ÷ 1000. Caudal pico: Q (L/s) = C × i (mm/h) × A (m²) ÷ 3600. Usa datos de precipitación de la estación de SENAMHI más cercana; el coeficiente de escorrentía y las pérdidas son valores que tú defines.</p></div>
+  <div class="panel" id="v20-out">${rainOut()}</div></div>`}
+
+/* ---------- 2. estimación de metrados ---------- */
+const MET=[
+ ['Desbroce y limpieza del área de trabajo','m²','1.300–1.500','Área del ATR más la franja de trabajo perimetral, según delimitación en campo.',[1300,1500]],
+ ['Nivelación y acondicionamiento del terreno','m²','Por verificar','Superficie efectiva de intervención y condiciones del terreno.'],
+ ['Conformación del cubeto de retención','Según diseño','Por verificar','Geometría, pendientes y altura de contención definidas en la ingeniería de detalle.'],
+ ['Zanja de anclaje perimetral','m','130–150','Estimación sujeta al perímetro definitivo y al detalle de anclaje.',[130,150]],
+ ['Geomembrana para el fondo del cubeto','m²','1.100–1.200','Estimación que incluye superficie, bordes, anclajes y solapes; deberá verificarse con la geometría final.',[1100,1200]],
+ ['Geomembrana para techo y cerramientos','m²','1.400–1.800','Estimación sujeta a la pendiente, los aleros, las dimensiones de la estructura y los cerramientos aprobados.',[1400,1800]],
+ ['Geomembrana para el ATR: adquisición preliminar','Rollos de 7 × 100 m','4–5 rollos','Cada rollo representa 700 m² nominales; la cantidad definitiva dependerá del despiece, los solapes y las pérdidas de instalación.',[4,5]],
+ ['Horcones de madera','unidad','40–60','Estimación sujeta a la distribución de apoyos y al diseño estructural.',[40,60]],
+ ['Vigas, soleras y arriostres','m lineales','Por determinar','Secciones, longitudes y cantidades definidas en la ingeniería de detalle.'],
+ ['Sumidero y accesorios de evacuación','Según diseño','Por determinar','Configuración, dimensiones y accesorios necesarios para la recolección y evacuación controlada.'],
+ ['Señalización perimetral','m y unidad','Por determinar','Perímetro definitivo y cantidad de señales requeridas.']];
+function metCalc(){const m=C('metrado');let A=num(m.A),P=num(m.P);
+  const f=v0(num(m.franja)),h=v0(num(m.h)),an=v0(num(m.anc)),sol=1+v0(num(m.solape))/100,al=v0(num(m.alero)),th=Math.atan(v0(num(m.pteo))/100),hc=v0(num(m.hc)),ci=v0(num(m.cierre))/100,dz=h+an,pd=1+v0(num(m.perd))/100,rollo=num(m.rollo),esp=num(m.esp),sep=num(m.sep);
+  const ok=Number.isFinite(A)&&A>0&&Number.isFinite(P)&&P>0,r=new Array(MET.length).fill(null),tx=new Array(MET.length).fill('');
+  if(!ok)return{ok,r,tx,A,P};
+  const desb=A+P*f+PI*f*f,fondo=(A+P*dz+PI*dz*dz)*sol,techo=(A+P*al+PI*al*al)/Math.cos(th)*sol,cier=P*hc*ci*sol,geoT=techo+cier;
+  r[0]=desb;r[1]=desb;tx[1]='Referencial: igual al desbroce';if(h>0){r[2]=A*h;tx[2]='Capacidad de contención A × h = '+f2(A*h)+' m³'}
+  r[3]=P+2*PI*dz;r[4]=fondo;r[5]=geoT;tx[5]=`Techo ${f2(techo,0)} m² + cerramientos ${f2(cier,0)} m²`;
+  if(Number.isFinite(rollo)&&rollo>0){r[6]=ce((fondo+geoT)*pd/rollo);tx[6]=`${f2((fondo+geoT)*pd,0)} m² totales ÷ ${f2(rollo,0)} m² por rollo`}
+  if(Number.isFinite(esp)&&esp>0){r[7]=ce(P/esp)+v0(num(m.hint));tx[7]=`${ce(P/esp)} perimetrales + ${v0(num(m.hint))} interiores`}
+  r[10]=P;tx[10]=Number.isFinite(sep)&&sep>0?`${f2(P,1)} m de perímetro · ${ce(P/sep)} señales`:f2(P,1)+' m de perímetro';
+  return{ok,r,tx,A,P}}
+const verif=(v,rg)=>{if(!rg||!Number.isFinite(v))return'<span class="mut">—</span>';return v>=rg[0]&&v<=rg[1]?'<span class="pill ok">Dentro del rango</span>':v<rg[0]?'<span class="pill warn">Por debajo</span>':'<span class="pill bad">Por encima</span>'};
+function metOut(){const c=metCalc();
+  const rows=MET.map((p,i)=>{const v=c.r[i],isInt=i===6||i===7;
+    return`<tr><td>${esc(p[0])}</td><td>${esc(p[1])}</td><td>${esc(p[2])}</td><td class="num"><b>${Number.isFinite(v)?f2(v,isInt?0:1):'—'}</b>${c.tx[i]?`<div class="mut" style="font:12px var(--f-body);white-space:normal;text-align:right">${esc(c.tx[i])}</div>`:''}</td><td>${verif(v,p[4])}</td><td class="mut" style="font-size:12.5px">${esc(p[3])}</td></tr>`}).join('');
+  return`${c.ok?'':'<p class="v20hint" style="padding:14px">Ingresa el <b>área</b> y el <b>perímetro</b> del ATR (o elige un polígono del mapa) para calcular. Las partidas "Por determinar" dependen de la ingeniería de detalle.</p>'}
+  <div class="tw" style="padding:0 14px 14px"><table><thead><tr><th>Partida</th><th>Unidad</th><th>Estimación preliminar de ECCAN</th><th class="num">Calculado</th><th>Verificación</th><th>Criterio</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <p class="v20hint">El cálculo es una estimación geométrica que debe verificarse con la geometría final y el diseño de detalle.</p>`}
+function metH(){const m=C('metrado'),gs=S.geo.filter(g=>g.tipo==='area'&&geoMeasure(g).area!=null);
+  return`<div class="v20two s"><div class="panel"><div class="v20in">
+  <div class="sec">Geometría del ATR</div>
+  <label class="f full" style="grid-column:1/-1">Tomar del mapa (polígono)<select data-v20="geo"><option value="">— Ingresar a mano —</option>${gs.map(g=>`<option value="${g.id}"${m.geo===g.id?' selected':''}>${esc(g.nombre||'Área sin nombre')} · ${f2(geoMeasure(g).area,0)} m²</option>`).join('')}</select></label>
+  ${inp('metrado','A','Área del ATR (m²)','m²')}${inp('metrado','P','Perímetro (m)','m')}
+  <div class="sec">Dimensiones de trabajo</div>${inp('metrado','franja','Franja de trabajo perimetral (m)','m')}${inp('metrado','h','Altura de contención (m)','m')}${inp('metrado','anc','Distancia de la zanja al borde (m)','m')}
+  ${inp('metrado','solape','Solapes y bordes (%)','%')}${inp('metrado','perd','Pérdidas de instalación (%)','%')}${inp('metrado','rollo','Área nominal por rollo (m²)','700')}
+  <div class="sec">Techo y estructura</div>${inp('metrado','pteo','Pendiente del techo (%)','%')}${inp('metrado','alero','Alero (m)','m')}${inp('metrado','hc','Altura de cerramientos (m)','m')}${inp('metrado','cierre','Perímetro cerrado (%)','100')}
+  ${inp('metrado','esp','Separación entre horcones (m)','m')}${inp('metrado','hint','Horcones interiores (u)','0')}${inp('metrado','sep','Separación entre señales (m)','m')}
+  </div><p class="v20hint">Los campos vacíos se toman como 0. La tabla de partidas y los rangos preliminares son los de ECCAN; la columna "Calculado" sale de los valores que ingreses aquí.</p></div>
+  <div class="panel" id="v20-out">${metOut()}</div></div>`}
+
+/* ---------- 3. zonas y almacenamiento ---------- */
+function zonCalc(){const m=C('zonas'),A=num(m.atr),bL=num(m.bbL),bW=num(m.bbW),bH=num(m.bbH),niv=num(m.niv),bT=num(m.bbT);
+  const rows=m.rows.map((r,i)=>{const L=num(r.L),Wd=num(r.W),H=num(r.H),oc=Number.isFinite(num(r.o))?num(r.o)/100:1,area=L*Wd,vol=area*H;
+    let bags=NaN;if(i===0&&bL>0&&bW>0&&niv>0&&L>0&&Wd>0)bags=Math.floor(L/bL)*Math.floor(Wd/bW)*Math.floor(niv)*(1);
+    if(i===0&&Number.isFinite(bags)&&Number.isFinite(bH)&&bH>0&&Number.isFinite(H)&&H>0)bags=Math.floor(L/bL)*Math.floor(Wd/bW)*Math.min(Math.floor(niv),Math.floor(H/bH));
+    return{n:r.n,area,vol,util:vol*oc,bags,ton:Number.isFinite(bags)&&bT>0?bags*bT:NaN}});
+  const tot=rows.reduce((a,x)=>a+(Number.isFinite(x.area)?x.area:0),0);return{rows,tot,A}}
+function zonOut(){const c=zonCalc();if(!c.rows.some(x=>Number.isFinite(x.area)))return'<p class="v20hint" style="padding:18px">Ingresa largo y ancho de cada zona para calcular su área y capacidad.</p>';
+  const lib=c.A-c.tot,over=Number.isFinite(c.A)&&c.tot>c.A;
+  return`<div class="kpis" style="padding:14px 14px 0">${kpi('Área total de zonas',f2(c.tot)+' m²',Number.isFinite(c.A)&&c.A>0?f2(c.tot/c.A*100,1)+' % del área del ATR':'')}${Number.isFinite(c.A)?kpi(over?'Excede el área del ATR':'Área libre del ATR',f2(Math.abs(lib))+' m²',over?'Revisa las dimensiones de las zonas':''):''}</div>
+  <div class="tw" style="padding:14px"><table style="min-width:560px"><thead><tr><th>Zona dentro del ATR</th><th class="num">Área (m²)</th><th class="num">% del ATR</th><th class="num">Volumen (m³)</th><th class="num">Capacidad útil (m³)</th><th class="num">Big bags (u)</th><th class="num">Capacidad (t)</th></tr></thead><tbody>${c.rows.map(x=>`<tr><td>${esc(x.n)}</td><td class="num">${f2(x.area)}</td><td class="num">${Number.isFinite(c.A)&&c.A>0?f2(x.area/c.A*100,1):'—'}</td><td class="num">${f2(x.vol)}</td><td class="num">${f2(x.util)}</td><td class="num">${Number.isFinite(x.bags)?f2(x.bags,0):'—'}</td><td class="num">${Number.isFinite(x.ton)?f2(x.ton):'—'}</td></tr>`).join('')}</tbody></table></div>
+  <p class="v20hint">Volumen = largo × ancho × altura útil (en el sumidero y la zona de contingencia, la altura es la profundidad). Capacidad útil = volumen × ocupación. Los big bags se calculan solo para la zona de acopio: unidades que caben en planta × niveles apilables (limitados por la altura útil).</p>`}
+function zonH(){const m=C('zonas');
+  return`<div class="v20two"><div class="panel"><div class="v20in" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr))">
+  <div class="sec">Datos generales</div>${inp('zonas','atr','Área total del ATR (m²)','m²')}${inp('zonas','bbL','Big bag: largo (m)','m')}${inp('zonas','bbW','Big bag: ancho (m)','m')}${inp('zonas','bbH','Big bag: alto (m)','m')}${inp('zonas','niv','Niveles apilables (u)','')}${inp('zonas','bbT','Peso por big bag (t)','t')}
+  </div><div class="tw v20t" style="padding:0 14px 14px"><table style="min-width:560px"><thead><tr><th>Zona dentro del ATR</th><th>Largo (m)</th><th>Ancho (m)</th><th>Alto / prof. (m)</th><th>Ocupación (%)</th></tr></thead><tbody>${m.rows.map((r,i)=>`<tr><td>${esc(r.n)}</td>${['L','W','H','o'].map(k=>`<td><input data-t="zonas" data-r="${i}" data-k="${k}" value="${esc(r[k])}" inputmode="decimal" autocomplete="off"></td>`).join('')}</tr>`).join('')}</tbody></table></div></div>
+  <div class="panel" id="v20-out">${zonOut()}</div></div>`}
+
+/* ---------- guardado y descarga de cálculos ---------- */
+const OUTS={lluvia:rainOut,metrado:metOut,zonas:zonOut},HS={lluvia:rainH,metrado:metH,zonas:zonH};
+function csvRows(t){if(t==='lluvia'){const r=rain();return[['Concepto','Valor','Unidad'],['Área horizontal efectiva',r.Ah,'m2'],['Coeficiente efectivo',r.ef,''],['Volumen por mm de lluvia',r.mm,'m3/mm'],['Volumen evento 24 h',r.evt,'m3'],['Caudal pico',r.q,'L/s'],...r.meses.map((x,i)=>[MES[i]+' (mm; m3)',x.p,x.v])]}
+  if(t==='metrado'){const c=metCalc();return[['Partida','Unidad','Estimación preliminar de ECCAN','Calculado','Detalle','Criterio'],...MET.map((p,i)=>[p[0],p[1],p[2],c.r[i],c.tx[i],p[3]])]}
+  const c=zonCalc();return[['Zona','Área (m2)','Volumen (m3)','Capacidad útil (m3)','Big bags (u)','Capacidad (t)'],...c.rows.map(x=>[x.n,x.area,x.vol,x.util,x.bags,x.ton])]}
+const csvEsc=v=>{v=v==null||(typeof v==='number'&&!Number.isFinite(v))?'':String(v);return/[;"\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+async function dlCsv(t){const rows=csvRows(t),name={lluvia:'Calculo_captacion_lluvia',metrado:'Estimacion_metrados_ATR',zonas:'Zonas_almacenamiento_ATR'}[t]+'_'+today()+'.csv';
+  await saveBlob(name,new Blob(['\ufeff'+rows.map(r=>r.map(csvEsc).join(';')).join('\r\n')],{type:'text/csv;charset=utf-8'}),'Cálculos')}
+const savedH=t=>{const L=S.calculos.filter(x=>x.tipo===t).sort((a,b)=>(b.creado||0)-(a.creado||0));
+  return`<div class="panel" style="margin-top:14px;padding:14px"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between"><b>Cálculos guardados</b><span style="display:flex;gap:8px">${W()?'<button class="btn sm pri" data-v20="savecalc">Guardar este cálculo</button>':''}<button class="btn sm" data-v20="csv">Descargar Excel (CSV)</button></span></div>
+  ${L.length?`<div class="tw"><table style="min-width:520px"><thead><tr><th>Nombre</th><th>Despacho</th><th>Fecha</th><th></th></tr></thead><tbody>${L.map(x=>`<tr><td>${esc(x.nombre)}</td><td>${esc(dOf(x)||SIN)}</td><td>${fmtD(x.fecha)}</td><td class="num"><button class="btn sm" data-v20="loadcalc" data-id="${x.id}">Cargar</button> ${W()?`<button class="btn sm danger" data-v20="del" data-c="calculos" data-id="${x.id}">Eliminar</button>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<p class="v20hint" style="padding:8px 0 0">Aún no hay cálculos guardados de este tipo.</p>'}</div>`};
+function vCal(){const t=TAB.cal;return`${head('Cálculos','Captación de lluvia, estimación de metrados y capacidad de almacenamiento del ATR')}${tabsH('cal')}${HS[t]()}${savedH(t)}`}
+
+/* ---------- ventanas de formulario ---------- */
+function fld(n,l,v,o){o=o||{};const full=o.full?' full':'';
+  if(o.sel)return`<label class="f${full}">${l}<select name="${n}">${o.sel.map(s=>`<option${s===v?' selected':''}>${esc(s)}</option>`).join('')}</select></label>`;
+  if(o.area)return`<label class="f${full}">${l}<textarea name="${n}" rows="2">${esc(v||'')}</textarea></label>`;
+  if(o.chk)return`<label class="f${full}" style="display:flex;gap:8px;align-items:center;text-transform:none"><input type="checkbox" name="${n}"${v?' checked':''} style="width:auto"> ${l}</label>`;
+  return`<label class="f${full}">${l}<input name="${n}" type="${o.type||'text'}" value="${esc(v??'')}"${o.list?' list="v20-dl"':''}${o.type==='number'?' step="any"':''} autocomplete="off"></label>`}
+const dlist=()=>`<datalist id="v20-dl">${despNames().map(x=>`<option value="${esc(x)}">`).join('')}</datalist>`;
+function dlg(title,html,onOk,okTxt){const o=document.createElement('div');o.className='v20ov';
+  o.innerHTML=`<div class="v20dg panel"><h3>${esc(title)}</h3><div class="fg">${html}</div>${dlist()}<div class="v20bt"><button class="btn" data-x="c">Cancelar</button><button class="btn pri" data-x="o">${okTxt||'Guardar'}</button></div></div>`;document.body.appendChild(o);
+  o.addEventListener('click',async e=>{const b=e.target.closest('[data-x]');if(e.target===o||(b&&b.dataset.x==='c')){o.remove();return}
+    if(b&&b.dataset.x==='o'){const v={};o.querySelectorAll('[name]').forEach(x=>{v[x.name]=x.type==='checkbox'?x.checked:x.value.trim()});const fi=o.querySelector('input[type=file]');v._files=fi?[...fi.files]:[];
+      b.disabled=true;let r;try{r=await onOk(v)}catch(er){toast('Error: '+(er&&er.message||er));r=false}b.disabled=false;if(r!==false){o.remove();render()}}});
+  const f=o.querySelector('input:not([type=file]),select');if(f)f.focus()}
+const FORMS={
+ cronograma:{t:'actividad',f:r=>fld('nombre','Actividad *',r.nombre,{full:1})+fld('despacho','Despacho',r.despacho,{list:1})+fld('responsable','Responsable',r.responsable)+fld('inicio','Inicio *',r.inicio||today(),{type:'date'})+fld('fin','Fin *',r.fin||today(),{type:'date'})+fld('avance','Avance (%)',r.avance??0,{type:'number'})+fld('obs','Observaciones',r.obs,{full:1,area:1}),
+   ok:v=>{if(!v.nombre)return'Escribe el nombre de la actividad';if(!v.inicio||!v.fin)return'Indica las fechas de inicio y fin';if(v.fin<v.inicio)return'La fecha de fin no puede ser anterior al inicio';v.avance=Math.max(0,Math.min(100,num(v.avance)||0))}},
+ hitos:{t:'hito de control',f:r=>fld('nombre','Hito *',r.nombre,{full:1})+fld('despacho','Despacho',r.despacho,{list:1})+fld('fecha','Fecha programada *',r.fecha||today(),{type:'date'})+fld('responsable','Responsable',r.responsable)+fld('fechaReal','Fecha real de cumplimiento',r.fechaReal,{type:'date'})+fld('criterio','Criterio de verificación',r.criterio,{full:1,area:1})+fld('cumplido','Hito cumplido',r.cumplido,{chk:1,full:1}),
+   ok:v=>{if(!v.nombre)return'Escribe el nombre del hito';if(!v.fecha)return'Indica la fecha programada';if(v.cumplido&&!v.fechaReal)v.fechaReal=today()}},
+ indicadores:{t:'indicador de control',f:r=>fld('nombre','Indicador *',r.nombre,{full:1})+fld('despacho','Despacho',r.despacho,{list:1})+fld('formula','Fórmula / definición',r.formula,{full:1})+fld('unidad','Unidad',r.unidad)+fld('meta','Meta *',r.meta,{type:'number'})+fld('valor','Valor actual',r.valor,{type:'number'})+fld('sentido','Sentido',r.sentido||'Mayor es mejor',{sel:['Mayor es mejor','Menor es mejor']})+fld('frecuencia','Frecuencia de medición',r.frecuencia||'Semanal',{sel:['Diaria','Semanal','Quincenal','Mensual']})+fld('responsable','Responsable',r.responsable)+fld('fechaMed','Fecha de la última medición',r.fechaMed||today(),{type:'date'})+fld('obs','Observaciones',r.obs,{full:1,area:1}),
+   ok:v=>{if(!v.nombre)return'Escribe el nombre del indicador';if(!Number.isFinite(num(v.meta)))return'Indica la meta'}}};
+function openForm(col,id){const F=FORMS[col],r=id?find(col,id)||{}:{};
+  dlg((id?'Editar ':'Nuevo ')+F.t,F.f(r),async v=>{const e=F.ok(v);if(e){toast(e);return false}delete v._files;await save(col,{...r,...v})})}
+
+/* ---------- 4. cronograma, hitos e indicadores ---------- */
+const DN=s=>{const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s||'');return m?Date.UTC(+m[1],+m[2]-1,+m[3])/864e5:NaN};
+const MS=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+const tasks=()=>S.cronograma.filter(t=>!CF||(CF===SIN?!dOf(t):dOf(t)===CF)).sort((a,b)=>String(a.inicio).localeCompare(String(b.inicio))||String(a.fin).localeCompare(String(b.fin)));
+const hitosL=()=>S.hitos.filter(t=>!CF||(CF===SIN?!dOf(t):dOf(t)===CF)).sort((a,b)=>String(a.fecha).localeCompare(String(b.fecha)));
+const tState=(t,h)=>{const av=num(t.avance)||0;return av>=100?'ok':DN(t.fin)<h?'late':DN(t.inicio)<=h?'run':'wait'};
+const hState=(x,h)=>x.cumplido?'ok':DN(x.fecha)<h?'late':DN(x.fecha)-h<=7?'soon':'wait';
+const HLBL={ok:['ok','Cumplido'],late:['bad','Vencido'],soon:['warn','Próximo (≤ 7 días)'],wait:['','Pendiente']};
+function stats(){const h=DN(today()),T=tasks(),H=hitosL();let dur=0,real=0,plan=0,fin=0,atr=0;
+  T.forEach(t=>{const d=Math.max(1,DN(t.fin)-DN(t.inicio)+1),av=Math.max(0,Math.min(100,num(t.avance)||0));dur+=d;real+=av*d;plan+=Math.max(0,Math.min(1,(h-DN(t.inicio)+1)/d))*100*d;if(av>=100)fin++;else if(DN(t.fin)<h)atr++});
+  const hc=H.filter(x=>x.cumplido).length,hv=H.filter(x=>hState(x,h)==='late').length;
+  return{n:T.length,real:dur?real/dur:NaN,plan:dur?plan/dur:NaN,spi:dur&&plan>0?real/plan:NaN,fin,atr,nh:H.length,hc,hv}}
+const cf=()=>`<div class="chips" role="group" aria-label="Despacho" style="margin-bottom:12px"><button class="chip" data-v20="cf" data-id="" aria-pressed="${!CF}">Todos los despachos</button>${despNames().map(n=>`<button class="chip" data-v20="cf" data-id="${esc(n)}" aria-pressed="${CF===n}">${esc(n)}</button>`).join('')}</div>`;
+const abtn=(c,id)=>W()?`<button class="btn sm" data-v20="edit" data-c="${c}" data-id="${id}">Editar</button> <button class="btn sm danger" data-v20="del" data-c="${c}" data-id="${id}">Eliminar</button>`:'';
+function ganttH(){const T=tasks(),H=hitosL(),s=stats(),h=DN(today());
+  const kp=`<div class="kpis">${kpi('Avance físico real',Number.isFinite(s.real)?f2(s.real,1)+' %':'—','Ponderado por duración de actividades')}${kpi('Avance programado a hoy',Number.isFinite(s.plan)?f2(s.plan,1)+' %':'—','Según fechas de inicio y fin')}${kpi('Índice de desempeño (real ÷ programado)',Number.isFinite(s.spi)?f2(s.spi,2):'—',Number.isFinite(s.spi)?(s.spi>=1?'En plazo o adelantado':s.spi>=.9?'Ligero atraso':'Atraso importante'):'')}${kpi('Actividades terminadas / atrasadas',s.fin+' / '+s.atr,'de '+s.n+' actividades')}${kpi('Hitos cumplidos / vencidos',s.hc+' / '+s.hv,'de '+s.nh+' hitos')}</div>`;
+  const tools=`<div class="tools">${W()?'<button class="btn pri" data-v20="new" data-c="cronograma">+ Nueva actividad</button><button class="btn" data-v20="new" data-c="hitos">+ Nuevo hito</button>':''}<span class="chips">${[['dia','Días'],['semana','Semanas'],['mes','Meses']].map(([k,n])=>`<button class="chip" data-v20="zoom" data-id="${k}" aria-pressed="${ZOOM===k}">${n}</button>`).join('')}</span><span class="xb"><span class="mut">Descargar</span>${xbtns('cronograma')}</span></div>`;
+  if(!T.length&&!H.length)return`${cf()}${kp}${tools}<div class="panel">${emptyBox('Aún no hay cronograma','Registra las actividades con su fecha de inicio, fin y avance, y los hitos de control para ver el diagrama de Gantt.',W()?'<button class="btn pri" data-v20="new" data-c="cronograma">+ Nueva actividad</button>':'')}</div>`;
+  const ds=[...T.flatMap(t=>[DN(t.inicio),DN(t.fin)]),...H.map(x=>DN(x.fecha))].filter(Number.isFinite),d0=Math.min(...ds,h)-2,d1=Math.max(...ds,h)+2,px={dia:28,semana:10,mes:3.5}[ZOOM],wd=(d1-d0+1)*px;
+  let ms='';for(let c=d0;c<=d1;){const d=new Date(c*864e5),nx=Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,1)/864e5,e=Math.min(nx-1,d1);ms+=`<div class="v20m" style="left:${(c-d0)*px}px;width:${(e-c+1)*px}px">${MS[d.getUTCMonth()]} ${d.getUTCFullYear()}</div>`;c=e+1}
+  const grid=`background-image:linear-gradient(to right,rgba(128,128,128,.2) 1px,transparent 1px);background-size:${7*px}px 100%`,tl=`<div class="v20td" style="left:${(h-d0)*px}px" title="Hoy"></div>`;
+  const rows=H.map(x=>{const st=hState(x,h);return`<div class="v20r"><div class="v20gl" title="${esc(x.nombre)}">◆ <b>${esc(x.nombre)}</b><br><span class="mut">${fmtD(x.fecha)}${dOf(x)?' · '+esc(dOf(x)):''}</span></div><div class="v20gt" style="width:${wd}px;${grid}">${tl}<div class="v20d ${st==='ok'?'ok':st==='late'?'late':''}" style="left:${(DN(x.fecha)-d0+.5)*px}px" data-v20="edit" data-c="hitos" data-id="${x.id}" title="${esc(x.nombre+' · '+fmtD(x.fecha)+' · '+HLBL[st][1])}"></div></div></div>`}).join('')+
+  T.map(t=>{const a=DN(t.inicio),b=DN(t.fin),av=Math.max(0,Math.min(100,num(t.avance)||0)),st=tState(t,h);return`<div class="v20r"><div class="v20gl" title="${esc(t.nombre)}"><b>${esc(t.nombre)}</b><br><span class="mut">${esc(t.responsable||'')}${dOf(t)?(t.responsable?' · ':'')+esc(dOf(t)):''}</span></div><div class="v20gt" style="width:${wd}px;${grid}">${tl}<div class="v20b ${st}" style="left:${(a-d0)*px}px;width:${(b-a+1)*px}px" data-v20="edit" data-c="cronograma" data-id="${t.id}" title="${esc(t.nombre+' · '+fmtD(t.inicio)+' → '+fmtD(t.fin)+' · '+av+' %')}"><i style="width:${av}%"></i><span>${av}%</span></div></div></div>`}).join('');
+  return`${cf()}${kp}${tools}<div class="v20g"><div class="v20r h"><div class="v20gl"><b>Actividad / hito</b></div><div class="v20gt" style="width:${wd}px">${ms}</div></div>${rows}</div>
+  <p class="v20hint" style="padding:8px 0">Verde: terminada · Azul: en curso · Gris: por iniciar · Rojo: atrasada · Rombo: hito de control · Línea roja: hoy. Haz clic en una barra o un rombo para editarlo.</p>`}
+function hitosH(){const h=DN(today()),L=hitosL();
+  return`${cf()}<div class="tools">${W()?'<button class="btn pri" data-v20="new" data-c="hitos">+ Nuevo hito</button>':''}<span class="xb"><span class="mut">Descargar</span>${xbtns('hitos')}</span></div>
+  <div class="panel tw">${L.length?`<table><thead><tr><th>Hito de control</th><th>Despacho</th><th>Fecha programada</th><th>Fecha real</th><th>Estado</th><th>Responsable</th><th>Criterio de verificación</th><th></th></tr></thead><tbody>${L.map(x=>{const st=hState(x,h),p=HLBL[st];return`<tr><td><b>${esc(x.nombre)}</b></td><td>${esc(dOf(x)||SIN)}</td><td class="mono">${fmtD(x.fecha)}</td><td class="mono">${fmtD(x.fechaReal)}</td><td><span class="pill ${p[0]}">${p[1]}</span></td><td>${esc(x.responsable||'—')}</td><td>${esc(x.criterio||'—')}</td><td class="num">${abtn('hitos',x.id)}</td></tr>`}).join('')}</tbody></table>`:emptyBox('Sin hitos de control','Registra los hitos que debes cumplir (por ejemplo: aprobación del diseño, entrega de materiales, culminación del ATR).',W()?'<button class="btn pri" data-v20="new" data-c="hitos">+ Nuevo hito</button>':'')}</div>`}
+const indCump=x=>{const m=num(x.meta),v=num(x.valor);if(!Number.isFinite(m)||!Number.isFinite(v))return NaN;if(x.sentido==='Menor es mejor')return v<=0?100:(m/v)*100;return m===0?NaN:v/m*100};
+const semH=p=>!Number.isFinite(p)?'<span class="mut">Sin medición</span>':`<span class="v20sem ${p>=100?'ok':p>=80?'warn':'bad'}"></span>${p>=100?'Cumple':p>=80?'En riesgo':'No cumple'}`;
+function indH(){const s=stats(),L=S.indicadores.filter(t=>!CF||(CF===SIN?!dOf(t):dOf(t)===CF)).sort((a,b)=>(a.creado||0)-(b.creado||0));
+  const auto=[['Avance físico global',s.real,'%',100],['Avance programado a la fecha',s.plan,'%',100],['Actividades terminadas',s.n?s.fin/s.n*100:NaN,'%',100],['Hitos cumplidos',s.nh?s.hc/s.nh*100:NaN,'%',100]];
+  return`${cf()}<div class="kpis">${kpi('Indicadores automáticos','4','Calculados desde el cronograma y los hitos')}</div>
+  <div class="panel tw" style="margin-bottom:14px"><table style="min-width:520px"><thead><tr><th>Indicador automático</th><th class="num">Valor</th><th>Fuente</th></tr></thead><tbody>${auto.map(a=>`<tr><td>${a[0]}</td><td class="num">${Number.isFinite(a[1])?f2(a[1],1)+' '+a[2]:'—'}</td><td class="mut">Módulo de cronograma</td></tr>`).join('')}<tr><td>Índice de desempeño del cronograma (real ÷ programado)</td><td class="num">${Number.isFinite(s.spi)?f2(s.spi,2):'—'}</td><td class="mut">${Number.isFinite(s.spi)?(s.spi>=1?'En plazo o adelantado':s.spi>=.9?'Ligero atraso':'Atraso importante'):'Módulo de cronograma'}</td></tr></tbody></table></div>
+  <div class="tools">${W()?'<button class="btn pri" data-v20="new" data-c="indicadores">+ Nuevo indicador</button>':''}<span class="xb"><span class="mut">Descargar</span>${xbtns('indicadores')}</span></div>
+  <div class="panel tw">${L.length?`<table><thead><tr><th>Indicador de control</th><th>Despacho</th><th>Fórmula</th><th class="num">Meta</th><th class="num">Valor</th><th class="num">Cumplimiento</th><th>Semáforo</th><th>Frecuencia</th><th>Responsable</th><th></th></tr></thead><tbody>${L.map(x=>{const p=indCump(x);return`<tr><td><b>${esc(x.nombre)}</b><br><span class="mut">${esc(x.sentido||'')}</span></td><td>${esc(dOf(x)||SIN)}</td><td>${esc(x.formula||'—')}</td><td class="num">${esc(x.meta)} ${esc(x.unidad||'')}</td><td class="num">${esc(x.valor??'—')} ${x.valor!==undefined&&x.valor!==''?esc(x.unidad||''):''}</td><td class="num">${Number.isFinite(p)?f2(p,1)+' %':'—'}</td><td>${semH(p)}</td><td>${esc(x.frecuencia||'')}${x.fechaMed?'<br><span class="mut">'+fmtD(x.fechaMed)+'</span>':''}</td><td>${esc(x.responsable||'—')}</td><td class="num">${abtn('indicadores',x.id)}</td></tr>`}).join('')}</tbody></table>`:emptyBox('Sin indicadores manuales','Define indicadores de control con su meta, fórmula y frecuencia (por ejemplo: % de residuos con disposición final, días sin incidentes).',W()?'<button class="btn pri" data-v20="new" data-c="indicadores">+ Nuevo indicador</button>':'')}</div>`}
+
+/* ---------- 5. anexos por módulo ---------- */
+const PMOD='Plan de trabajo',PLAN=[['Anexo 1','Ubicación del almacén (imagen satelital)'],['Anexo 2','Plano referencial del contenedor del almacén'],['Anexo 3','Cuadro de materiales por zona'],['Anexo 4','Matriz de requerimiento'],['Anexo 5','Checklist de inspección'],['Anexo 6','Acta de entrega y recepción'],['Anexo 8','Acta de custodia']];
+const MODS=[PMOD,'Inventario de residuos','Reportes diarios','Matriz IPERC','Documentos y fotos','Mejora continua','Mapas y riesgos','Cálculos','Cronograma','Hitos de control','Indicadores de control','General'];
+function planH(){const A=S.anexosmod.filter(x=>x.plan&&dOf(x)==='Despacho 1'),ok=PLAN.filter(([c])=>A.some(x=>x.plan===c)).length;
+  return`<div class="panel" style="margin-bottom:14px"><div style="padding:14px 14px 0;display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between;align-items:baseline"><b>Plan de Trabajo – Despacho 01 · Anexos del plan</b><span class="mut">${ok} de ${PLAN.length} anexos adjuntados</span></div>
+  <div class="tw" style="padding:6px 14px 14px"><table style="min-width:560px"><thead><tr><th>Anexo</th><th>Contenido</th><th>Estado</th><th>Archivos</th><th></th></tr></thead><tbody>${PLAN.map(([c,n])=>{const f=A.filter(x=>x.plan===c);return`<tr><td><b>${c}</b></td><td>${n}</td><td>${f.length?'<span class="pill ok">Adjuntado</span>':'<span class="pill warn">Pendiente</span>'}</td><td>${f.map(x=>esc(x.nombre)).join('<br>')||'<span class="mut">—</span>'}</td><td class="num">${W()?`<button class="btn sm" data-v20="planupl" data-id="${c}">Adjuntar</button> `:''}${f.length?`<button class="btn sm" data-v20="axdl" data-id="${f[f.length-1].id}">Descargar</button>`:''}</td></tr>`}).join('')}</tbody></table></div>
+  <p class="v20hint">El Anexo 7 pertenece a los TDR y no al plan, por eso no aparece. En la carpeta del equipo y en el ZIP quedan en <b>Despacho 1 / Plan de trabajo / Anexo N</b>.</p></div>`}
+function anexosH(){const A=S.anexosmod,L=A.filter(x=>(!AXM||x.modulo===AXM)&&(!CF||(CF===SIN?!dOf(x):dOf(x)===CF))).sort((a,b)=>(b.creado||0)-(a.creado||0));
+  return`${planH()}${cf()}<div class="chips" role="group" aria-label="Módulo" style="margin-bottom:12px"><button class="chip" data-v20="axm" data-id="" aria-pressed="${!AXM}">Todos los módulos<small>${A.length}</small></button>${MODS.map(m=>`<button class="chip" data-v20="axm" data-id="${esc(m)}" aria-pressed="${AXM===m}">${esc(m)}<small>${A.filter(x=>x.modulo===m).length}</small></button>`).join('')}</div>
+  <div class="tools">${W()?'<button class="btn pri" data-v20="upl">+ Subir anexos</button>':''}</div>
+  ${LOC?'':'<p class="v20hint" style="padding:0 0 10px">Los anexos se guardan en la versión descargable (GitHub o archivo local).</p>'}
+  <div class="panel tw">${L.length?`<table><thead><tr><th>Anexo</th><th>Módulo</th><th>Despacho</th><th>Fecha</th><th>Tamaño</th><th>Descripción</th><th></th></tr></thead><tbody>${L.map(x=>`<tr><td><b>${esc(x.nombre)}</b></td><td><span class="tag">${esc(x.modulo)}</span>${x.plan?' <span class="tag">'+esc(x.plan)+'</span>':''}</td><td>${esc(dOf(x)||SIN)}</td><td class="mono">${fmtD(x.fecha)}</td><td class="mono">${kb(x.tamano||0)}</td><td>${esc(x.desc||'—')}</td><td class="num"><button class="btn sm" data-v20="axdl" data-id="${x.id}">Descargar</button> ${W()?`<button class="btn sm danger" data-v20="del" data-c="anexosmod" data-id="${x.id}">Eliminar</button>`:''}</td></tr>`).join('')}</tbody></table>`:emptyBox('Sin anexos','Sube aquí la documentación de respaldo de cada módulo: informes, actas, planos, fotos, sustentos.',W()&&LOC?'<button class="btn pri" data-v20="upl">+ Subir anexos</button>':'')}</div>
+  <p class="v20hint" style="padding:8px 0">En la carpeta del equipo quedan en <b>Despacho X / Anexos de módulos / Módulo</b>, y también salen en el ZIP de documentos.</p>`}
+function upload(){if(!LOC){toast('Subir anexos requiere la versión descargable (GitHub o archivo local)');return}
+  dlg('Subir anexos',`<label class="f full">Archivos *<input type="file" multiple></label>${fld('modulo','Módulo al que pertenecen',AXM||MODS[0],{sel:MODS})}${fld('despacho','Despacho',CF&&CF!==SIN?CF:'',{list:1})}${fld('desc','Descripción',  '',{full:1,area:1})}`,
+    async v=>{if(!v._files.length){toast('Elige al menos un archivo');return false}let n=0;
+      for(const f of v._files){try{const bid=newId();await putBlob(bid,f);await save('anexosmod',{modulo:v.modulo,despacho:v.despacho,desc:v.desc,nombre:f.name,tipo:f.type||'',tamano:f.size,blobId:bid,fecha:today()});n++}catch(e){toast('No se pudo guardar '+f.name)}}
+      if(n)toast(n+' anexo'+(n>1?'s':'')+' guardado'+(n>1?'s':''));return n>0},'Subir')}
+function planUpl(c){if(!LOC){toast('Subir anexos requiere la versión descargable (GitHub o archivo local)');return}const n=(PLAN.find(x=>x[0]===c)||[])[1]||'';
+  dlg('Adjuntar '+c+' · '+n,`<label class="f full">Archivos *<input type="file" multiple></label>${fld('desc','Descripción',  '',{full:1,area:1})}`,
+    async v=>{if(!v._files.length){toast('Elige al menos un archivo');return false}let k=0;
+      for(const f of v._files){try{const bid=newId();await putBlob(bid,f);await save('anexosmod',{modulo:PMOD,plan:c,despacho:'Despacho 1',desc:v.desc||n,nombre:f.name,tipo:f.type||'',tamano:f.size,blobId:bid,fecha:today()});k++}catch(e){toast('No se pudo guardar '+f.name)}}
+      if(k)toast(k+' archivo'+(k>1?'s':'')+' adjuntado'+(k>1?'s':'')+' a '+c);return k>0},'Adjuntar')}
+async function axDl(id){const x=find('anexosmod',id);if(!x)return;const b=x.blobId?await getBlob(x.blobId):null;if(!b){toast('Archivo no encontrado en este equipo');return}
+  await saveBlob(x.nombre,b,(dOf(x)||SIN)+(x.plan?'/Plan de trabajo/'+x.plan:'/Anexos de módulos/'+x.modulo))}
+function vCro(){const t=TAB.cro;return`${head('Cronograma y control','Cronograma (Gantt), hitos de control, indicadores y anexos de documentación por módulo')}${tabsH('cro')}${({gantt:ganttH,hitos:hitosH,ind:indH,anexos:anexosH})[t]()}`}
+
+/* ---------- exportación (PDF / Word / Excel) ---------- */
+XT.cronograma={t:'Cronograma de actividades',h:['Actividad','Despacho','Responsable','Inicio','Fin','Duración (días)','Avance %','Estado','Observaciones'],rc:[],r:()=>S.cronograma.slice().sort((a,b)=>String(a.inicio).localeCompare(String(b.inicio))).map(t=>[t.nombre,dOf(t)||SIN,t.responsable,fmtD(t.inicio),fmtD(t.fin),DN(t.fin)-DN(t.inicio)+1,t.avance||0,{ok:'Terminada',late:'Atrasada',run:'En curso',wait:'Por iniciar'}[tState(t,DN(today()))],t.obs])};
+XT.hitos={t:'Hitos de control',h:['Hito','Despacho','Fecha programada','Fecha real','Estado','Responsable','Criterio de verificación'],rc:[],r:()=>S.hitos.slice().sort((a,b)=>String(a.fecha).localeCompare(String(b.fecha))).map(x=>[x.nombre,dOf(x)||SIN,fmtD(x.fecha),fmtD(x.fechaReal),HLBL[hState(x,DN(today()))][1],x.responsable,x.criterio])};
+XT.indicadores={t:'Indicadores de control',h:['Indicador','Despacho','Fórmula','Unidad','Meta','Valor actual','Cumplimiento %','Estado','Sentido','Frecuencia','Responsable','Última medición'],rc:[],r:()=>S.indicadores.map(x=>{const p=indCump(x);return[x.nombre,dOf(x)||SIN,x.formula,x.unidad,x.meta,x.valor,Number.isFinite(p)?Math.round(p*10)/10:'',Number.isFinite(p)?(p>=100?'Cumple':p>=80?'En riesgo':'No cumple'):'Sin medición',x.sentido,x.frecuencia,x.responsable,fmtD(x.fechaMed)]})};
+
+/* ---------- eventos ---------- */
+function post(){}
+const upd=()=>{const o=document.getElementById('v20-out');if(o&&OUTS[TAB.cal])o.innerHTML=OUTS[TAB.cal]()};
+document.addEventListener('input',e=>{const el=e.target;if(!el.dataset||!el.dataset.t)return;const t=el.dataset.t,m=C(t);
+  if(el.dataset.i!==undefined)m.meses[+el.dataset.i]=el.value;else if(el.dataset.r!==undefined)m.rows[+el.dataset.r][el.dataset.k]=el.value;else m[el.dataset.k]=el.value;
+  if(t==='metrado'&&(el.dataset.k==='A'||el.dataset.k==='P'))m.geo='';sv();upd()});
+document.addEventListener('change',e=>{const el=e.target;if(!el.dataset)return;
+  if(el.dataset.t&&el.tagName==='SELECT'){C(el.dataset.t)[el.dataset.k]=el.value;sv();render();return}
+  if(el.dataset.v20==='geo'){const m=C('metrado');m.geo=el.value;const g=find('geo',el.value);if(g){const q=geoMeasure(g);if(q.area!=null){m.A=String(Math.round(q.area*100)/100);m.P=String(Math.round(q.per*100)/100)}}sv();render()}});
+document.addEventListener('click',async e=>{const b=e.target.closest&&e.target.closest('[data-v20]');if(!b)return;const a=b.dataset.v20,id=b.dataset.id,c=b.dataset.c;
+  if(a==='tab'){TAB[b.dataset.m]=id;render();return}
+  if(a==='zoom'){ZOOM=id;render();return}
+  if(a==='cf'){CF=id;render();return}
+  if(a==='axm'){AXM=id;render();return}
+  if(a==='new'){if(W())openForm(c);return}
+  if(a==='edit'){if(W())openForm(c,id);return}
+  if(a==='upl'){upload();return}
+  if(a==='axdl'){axDl(id);return}
+  if(a==='planupl'){planUpl(id);return}
+  if(a==='csv'){dlCsv(TAB.cal);return}
+  if(a==='del'){if(!W()||!confirm('¿Eliminar este registro? Esta acción no se puede deshacer.'))return;await remove(c,id);render();return}
+  if(a==='savecalc'){const t=TAB.cal,nm={lluvia:'Captación de lluvia',metrado:'Estimación de metrados',zonas:'Zonas del ATR'}[t];
+    dlg('Guardar cálculo',fld('nombre','Nombre *',nm+' · '+fmtD(today()),{full:1})+fld('despacho','Despacho','',{list:1}),async v=>{if(!v.nombre){toast('Escribe un nombre');return false}delete v._files;await save('calculos',{tipo:t,nombre:v.nombre,despacho:v.despacho,fecha:today(),datos:cl(C(t))})});return}
+  if(a==='loadcalc'){const x=find('calculos',id);if(x&&x.datos){CS[x.tipo]=cl(x.datos);sv();TAB.cal=x.tipo;render();toast('Cálculo cargado: '+x.nombre)}return}
+});
+
+/* ---------- integración con la vista y con la copia a carpetas ---------- */
+const _r20=render;
+render=function(){if(view==='cal'||view==='cro'){const v=view;view='dash';try{_r20()}finally{view=v}
+  renderNav();$('#main').innerHTML=v==='cal'?vCal():vCro();document.title='Gestión de Residuos Peligrosos'}else _r20()};
 })();
 
 render();boot();
