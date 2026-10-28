@@ -2141,7 +2141,7 @@ render=function(){_r3();const m=ipxActive();if(!m)return;const rows=rowsOf(m.id)
      más reciente y no se borra nada. Antes de escribir se guarda un respaldo diario en Drive (carpeta respaldos/).
    - Reutiliza el motor de sincronización v13 (mismas reglas de unión, borrados y archivos). */
 if(LOCAL)(()=>{
-const GD_CID='';                       /* opcional: pega aquí tu ID de cliente OAuth para no escribirlo en cada equipo */
+const GD_CID='548406313962-9gjbkpjv0rpobluaoa5k7e5rh3tlh4uf.apps.googleusercontent.com';                       /* opcional: pega aquí tu ID de cliente OAuth para no escribirlo en cada equipo */
 const FOLDER_NAME='Gestión de Residuos',FOLDER_MIME='application/vnd.google-apps.folder';
 const SCOPE='https://www.googleapis.com/auth/drive';
 const API='https://www.googleapis.com/drive/v3',UP='https://www.googleapis.com/upload/drive/v3';
@@ -2524,6 +2524,50 @@ function grid(map,G,on){G.clearLayers();const Lf=window.L;if(!on||map.getZoom()<
   const lbl=(pt,t)=>Lf.marker(pt,{icon:Lf.divIcon({className:'v19lbl',html:t,iconSize:null}),interactive:false,keyboard:false}).addTo(G);
   let k=0;for(let E=Math.ceil(E0/step)*step;E<=E1&&k<14;E+=step,k++){const ln=[];for(let i=0;i<=6;i++)ln.push(utm2ll(zl,E,N0+(N1-N0)*i/6));Lf.polyline(ln,o).addTo(G);lbl(utm2ll(zl,E,N0+(N1-N0)*.03),'E '+sp(E))}
   k=0;for(let N=Math.ceil(N0/step)*step;N<=N1&&k<14;N+=step,k++){const ln=[];for(let i=0;i<=6;i++)ln.push(utm2ll(zl,E0+(E1-E0)*i/6,N));Lf.polyline(ln,o).addTo(G);lbl(utm2ll(zl,E0+(E1-E0)*.02,N),'N '+sp(N))}}
+/* ---------- imagen del mapa (PNG) ---------- */
+async function snap(map){
+  const cont=map.getContainer(),cr=cont.getBoundingClientRect(),W=Math.round(cr.width),H=Math.round(cr.height),S=2;
+  const cv=document.createElement('canvas');cv.width=W*S;cv.height=H*S;const x=cv.getContext('2d');x.scale(S,S);x.fillStyle='#cfd8dc';x.fillRect(0,0,W,H);
+  const rel=el=>{const r=el.getBoundingClientRect();return{x:r.left-cr.left,y:r.top-cr.top,w:r.width,h:r.height}};
+  const load=async src=>{try{const r=await fetch(src,{mode:'cors',cache:'no-store'});if(!r.ok)return null;return await createImageBitmap(await r.blob())}catch(_){return null}};
+  let blocked=0;
+  const tiles=[...cont.querySelectorAll('.leaflet-tile-pane img.leaflet-tile-loaded')],bms=await Promise.all(tiles.map(t=>load(t.currentSrc||t.src)));
+  tiles.forEach((t,i)=>{const b=bms[i];if(!b){blocked++;return}const r=rel(t),ly=t.closest('.leaflet-layer');x.globalAlpha=ly?(parseFloat(getComputedStyle(ly).opacity)||1):1;x.drawImage(b,r.x,r.y,r.w+.5,r.h+.5)});x.globalAlpha=1;
+  for(const sv of cont.querySelectorAll('.leaflet-overlay-pane svg')){const r=rel(sv);if(!r.w||!r.h)continue;const c=sv.cloneNode(true);c.setAttribute('xmlns','http://www.w3.org/2000/svg');c.removeAttribute('style');c.setAttribute('width',r.w);c.setAttribute('height',r.h);
+    const im=new Image();await new Promise(ok=>{im.onload=ok;im.onerror=ok;im.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(new XMLSerializer().serializeToString(c))});
+    if(im.naturalWidth)x.drawImage(im,r.x,r.y,r.w,r.h)}
+  x.textBaseline='top';x.lineJoin='round';
+  for(const m of cont.querySelectorAll('.leaflet-marker-pane .leaflet-marker-icon')){const r=rel(m);
+    if(m.classList.contains('v19lbl')){const t=m.textContent;x.font='bold 10px ui-monospace,Consolas,monospace';x.lineWidth=3;x.strokeStyle='#000';x.strokeText(t,r.x,r.y);x.fillStyle='#fff';x.fillText(t,r.x,r.y)}
+    else if(m.tagName==='IMG'){const b=await load(m.src);if(b)x.drawImage(b,r.x,r.y,r.w,r.h);else blocked++}}
+  const c0=map.getCenter(),u=ll2utm(c0.lat,c0.lng),mpp=map.distance(map.containerPointToLatLng([0,H/2]),map.containerPointToLatLng([100,H/2]))/100,
+    NI=[1,2,5,10,20,50,100,200,500,1000,2000,5000,10000,20000,50000,100000],nice=[...NI].reverse().find(v=>v<=mpp*140)||1,len=nice/mpp,FH=36;
+  x.fillStyle='rgba(255,255,255,.92)';x.fillRect(0,H-FH,W,FH);x.fillStyle='#111';
+  x.font='bold 12px system-ui,Arial';x.fillText('Mapa · Gestión de residuos peligrosos · '+new Date().toLocaleString('es-PE'),8,H-FH+5);
+  x.font='11px ui-monospace,Consolas,monospace';x.fillText('Centro: UTM '+u.zn+u.band+' '+(u.south?'Sur':'Norte')+' · Datum WGS84 · E '+sp(u.E)+' m · N '+sp(u.N)+' m',8,H-FH+21);
+  const at=((cont.querySelector('.leaflet-control-attribution')||{}).textContent||'').replace(/^\s*Leaflet\s*\|?\s*/,'');
+  x.font='9px system-ui,Arial';x.textAlign='right';x.fillText(at.slice(0,150),W-6,H-FH+23);x.textAlign='left';
+  const lab=nice>=1000?(nice/1000)+' km':nice+' m',sx=12,sy=H-FH-22;x.font='bold 11px system-ui,Arial';
+  x.fillStyle='rgba(255,255,255,.9)';x.fillRect(sx-6,sy-8,len+x.measureText(lab).width+24,26);
+  x.strokeStyle='#111';x.lineWidth=2;x.beginPath();x.moveTo(sx,sy+4);x.lineTo(sx,sy+11);x.lineTo(sx+len,sy+11);x.lineTo(sx+len,sy+4);x.stroke();x.fillStyle='#111';x.fillText(lab,sx+len+6,sy+3);
+  const nx=W-26,ny=14;x.fillStyle='rgba(255,255,255,.9)';x.fillRect(nx-14,ny-10,28,44);x.fillStyle='#111';x.beginPath();x.moveTo(nx,ny);x.lineTo(nx-8,ny+20);x.lineTo(nx,ny+15);x.lineTo(nx+8,ny+20);x.closePath();x.fill();
+  x.font='bold 11px system-ui,Arial';x.textAlign='center';x.fillText('N',nx,ny+23);x.textAlign='left';
+  return{cv,blocked}}
+function preview(blob,name){const url=URL.createObjectURL(blob),o=document.createElement('div');
+  o.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.72);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:14px';
+  o.innerHTML='<img alt="Imagen del mapa" style="max-width:96vw;max-height:78vh;border-radius:6px;box-shadow:0 4px 20px rgba(0,0,0,.5)" src="'+url+'"><div style="display:flex;gap:8px"><button class="btn pri" id="v19-dl">Descargar imagen (PNG)</button><button class="btn" id="v19-x">Cerrar</button></div>';
+  document.body.appendChild(o);const close=()=>{o.remove();URL.revokeObjectURL(url)};
+  o.querySelector('#v19-x').onclick=close;o.querySelector('#v19-dl').onclick=()=>saveBlob(name,blob);o.addEventListener('click',e=>{if(e.target===o)close()})}
+function imgCtl(map){const Lf=window.L,C=Lf.control({position:'topleft'});
+  C.onAdd=()=>{const d=Lf.DomUtil.create('div','leaflet-bar'),a=Lf.DomUtil.create('a','',d);a.href='#';a.title='Tomar imagen del mapa y descargarla';a.textContent='📷 Imagen';
+    a.style.cssText='width:auto;padding:0 9px;font:600 12px/30px system-ui,Arial;white-space:nowrap';Lf.DomEvent.disableClickPropagation(d);
+    a.addEventListener('click',async e=>{e.preventDefault();if(a._b)return;a._b=1;const t=a.textContent;a.textContent='Generando…';
+      try{const{cv,blocked}=await snap(map),blob=await new Promise((ok,no)=>{try{cv.toBlob(b=>b?ok(b):no(new Error('imagen vacía')),'image/png')}catch(er){no(er)}}),d2=new Date(),hm=String(d2.getHours()).padStart(2,'0')+String(d2.getMinutes()).padStart(2,'0');
+        preview(blob,'Mapa_residuos_'+today()+'_'+hm+'.png');
+        if(blocked)toast('Algunas imágenes de fondo no permiten exportarse (p. ej. Google). Para la imagen completa usa «Satélite Esri» o «Calles»')}
+      catch(er){toast('No se pudo generar la imagen: '+(er&&er.message||'error'))}
+      a.textContent=t;a._b=0});return d};
+  C.addTo(map)}
 function utmUI(map){const Lf=window.L;if(!Lf||map._v19)return;map._v19=1;
   let fmt=lsg('v19-fmt')||'utm',on=lsg('v19-grid')!=='0',last=map.getCenter();const G=Lf.layerGroup().addTo(map);
   const show=ll=>{last=ll;const t=document.getElementById('v19-txt');if(!t)return;
@@ -2535,7 +2579,7 @@ function utmUI(map){const Lf=window.L;if(!Lf||map._v19)return;map._v19=1;
     Lf.DomEvent.disableClickPropagation(d);
     d.querySelector('#v19-txt').addEventListener('click',()=>{fmt=fmt==='utm'?'ll':'utm';lss('v19-fmt',fmt);show(last)});
     d.querySelector('#v19-g').addEventListener('change',e=>{on=e.target.checked;lss('v19-grid',on?'1':'0');grid(map,G,on)});return d};
-  C.addTo(map);show(map.getCenter());grid(map,G,on);
+  C.addTo(map);try{imgCtl(map)}catch(e){console.warn(e)}show(map.getCenter());grid(map,G,on);
   map.on('mousemove',e=>show(e.latlng));map.on('click',e=>show(e.latlng));map.on('moveend',()=>grid(map,G,on));
   map.on('popupopen',e=>{try{const p=e.popup,c=p.getContent(),ll=p.getLatLng();if(typeof c==='string'&&ll&&!c.includes('data-utm19')){const u=ll2utm(ll.lat,ll.lng);p.setContent(c+'<br><small data-utm19 style="font-family:monospace">UTM '+u.zn+u.band+' '+(u.south?'Sur':'Norte')+' WGS84 · E '+sp(u.E)+' · N '+sp(u.N)+'</small>')}}catch(_){}})}
 const _ig=initGeo;initGeo=function(map,pts){_ig(map,pts);try{utmUI(map)}catch(e){console.warn('UTM',e)}};
