@@ -2892,5 +2892,56 @@ render=function(){if(view==='cal'||view==='cro'||view==='anx'){const v=view;view
   renderNav();$('#main').innerHTML=v==='cal'?vCal():v==='cro'?vCro():vAnx();document.title='Gestión de Residuos Peligrosos'}else _r20();try{store()}catch(_){}};
 })();
 
+/* ====== v22 · MENÚ LATERAL POR FASES (Antes · Durante · Después) ====== */
+(()=>{
+const FASES=[
+ {id:'gen',t:'General',s:'',k:['dash']},
+ {id:'pre',t:'1 · Antes',s:'Preparación y acreditación',k:['cro','cal','ipe','personal','unidades']},
+ {id:'dur',t:'2 · Durante',s:'Ejecución en campo',k:['rep','asistencia','monitor','transporte','materiales','inv','map']},
+ {id:'pos',t:'3 · Después',s:'Cierre y documentación',k:['mej','doc','anx','exp']},
+ {id:'sis',t:'Sistema',s:'',k:['gdr']}
+];
+const LS='v22-fases';
+let OFF={};
+try{OFF=JSON.parse(localStorage.getItem(LS)||'{}')||{}}catch(_){}
+const COL={pre:'#e8b95a',dur:'#5cc6a2',pos:'#7aa7e8'};
+const st=document.createElement('style');
+st.textContent=`
+.nav .fase{display:flex;align-items:center;gap:8px;width:100%;margin-top:10px;padding:6px 10px;background:none;border:0;border-radius:6px;cursor:pointer;color:var(--side-muted);text-align:left}
+.nav .fase:hover{background:var(--side-active)}
+.nav .fase b{font:700 12px var(--f-display);letter-spacing:.12em;text-transform:uppercase;color:var(--side-ink)}
+.nav .fase small{display:block;font:400 10.5px var(--f-body);letter-spacing:.02em;text-transform:none;color:var(--side-muted)}
+.nav .fase .ch{margin-left:auto;transition:transform .15s;font-size:11px}
+.nav .fase[aria-expanded="false"] .ch{transform:rotate(-90deg)}
+.nav .fase i{width:8px;height:8px;border-radius:50%;flex:none;background:var(--c,#8ea396)}
+.nav .fgrp{display:flex;flex-direction:column;gap:2px;margin-left:8px;border-left:1px solid var(--side-active)}
+.nav .fgrp.plano{border:0;margin:0}
+.nav .fgrp button{padding:8px 10px}
+@media(max-width:860px){.nav .fase{display:none}.nav .fgrp{flex-direction:row;margin:0;border:0}}`;
+document.head.appendChild(st);
+renderNav=function(){
+  const by=Object.fromEntries(VIEWS.map(v=>[v[0],v]));
+  const btn=([k,t,c])=>`<button data-go="${k}" ${k===view?'aria-current="page"':''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k]||''}</svg>${t}${c?`<span class="n">${(S[c]||[]).length}</span>`:''}</button>`;
+  const grupos=FASES.slice();
+  const resto=VIEWS.filter(v=>!FASES.some(f=>f.k.includes(v[0]))).map(v=>v[0]);
+  if(resto.length)grupos.splice(grupos.length-1,0,{id:'otr',t:'Otros',s:'',k:resto});
+  $('#nav').innerHTML=grupos.map(f=>{
+    const it=f.k.map(k=>by[k]).filter(Boolean);
+    if(!it.length)return'';
+    const activa=it.some(v=>v[0]===view),abierto=activa||!OFF[f.id];
+    const cab=f.id==='gen'?'':`<button class="fase" data-fase="${f.id}" aria-expanded="${abierto}" style="--c:${COL[f.id]||'#8ea396'}"><i></i><span><b>${f.t}</b>${f.s?`<small>${f.s}</small>`:''}</span><span class="ch">▼</span></button>`;
+    return cab+(abierto?`<div class="fgrp${f.id==='gen'?' plano':''}">${it.map(btn).join('')}</div>`:'');
+  }).join('');
+};
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-fase]');
+  if(!b)return;
+  const id=b.dataset.fase;
+  OFF[id]=!OFF[id];
+  try{localStorage.setItem(LS,JSON.stringify(OFF))}catch(_){}
+  renderNav();
+});
+})();
+
 render();boot();
 </script>
