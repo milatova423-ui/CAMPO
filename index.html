@@ -2595,9 +2595,10 @@ try{const g=XT.geo;if(g&&!g.v19){g.v19=1;const h0=g.h,r0=g.r;g.h=[...h0,'Zona UT
 (()=>{
 ['calculos','cronograma','hitos','indicadores','anexosmod'].forEach(k=>{if(!S[k])S[k]=[]});
 ICON.cal='<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 12h2M14 12h2M8 16h2M14 16h2"/>';
+ICON.anx='<path d="M21 11l-8.5 8.5a5 5 0 01-7-7L14 4a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-3-3L15 7"/>';
 ICON.cro='<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 2v4M16 2v4M7 13h6M10 17h7"/>';
-if(!VIEWS.some(v=>v[0]==='cal'))VIEWS.splice(6,0,['cal','Cálculos','calculos'],['cro','Cronograma y control','cronograma']);
-try{const h=location.hash.slice(1);if(h==='cal'||h==='cro')view=h}catch(_){}
+if(!VIEWS.some(v=>v[0]==='cal'))VIEWS.splice(6,0,['cal','Cálculos','calculos'],['cro','Cronograma y control','cronograma'],['anx','Anexos','anexosmod']);
+try{const h=location.hash.slice(1);if(h==='cal'||h==='cro'||h==='anx')view=h}catch(_){}
 const LOC=typeof LOCAL!=='undefined'&&LOCAL,SIN='Sin despacho';
 const W=()=>typeof canWrite==='undefined'||canWrite;
 const num=v=>{const x=parseFloat(String(v==null?'':v).replace(',','.'));return Number.isFinite(x)?x:NaN};
@@ -2650,7 +2651,7 @@ const sv=()=>{try{localStorage.setItem('v20-cs',JSON.stringify(CS))}catch(_){}};
 const C=t=>{const d=cl(DEF[t]),c=CS[t]||{};CS[t]={...d,...c};if(t==='lluvia'&&!Array.isArray(CS[t].meses))CS[t].meses=d.meses;if(t==='zonas'&&!Array.isArray(CS[t].rows))CS[t].rows=d.rows;return CS[t]};
 let TAB={cal:'lluvia',cro:'gantt'},ZOOM='semana',CF='',AXM='';
 const TABS={cal:[['lluvia','Captación de lluvia'],['metrado','Estimación de metrados'],['zonas','Zonas y almacenamiento del ATR']],
-  cro:[['gantt','Cronograma'],['hitos','Hitos de control'],['ind','Indicadores de control'],['anexos','Anexos por módulo']]};
+  cro:[['gantt','Cronograma'],['hitos','Hitos de control'],['ind','Indicadores de control']]};
 const tabsH=m=>`<div class="chips" role="tablist" style="margin-bottom:14px">${TABS[m].map(([k,t])=>`<button class="chip" role="tab" data-v20="tab" data-m="${m}" data-id="${k}" aria-pressed="${TAB[m]===k}">${t}</button>`).join('')}</div>`;
 const inp=(t,k,l,ph,extra)=>`<label class="f">${l}<input data-t="${t}" data-k="${k}" value="${esc(C(t)[k]??'')}" inputmode="decimal" placeholder="${esc(ph||'')}" autocomplete="off" ${extra||''}></label>`;
 const kpi=(l,b,f)=>`<div class="kpi" style="cursor:default"><span class="lb">${l}</span><span class="big">${b}</span><span class="ft">${f||''}</span></div>`;
@@ -2838,6 +2839,7 @@ function planUpl(c){if(!LOC){toast('Subir anexos requiere la versión descargabl
       if(k)toast(k+' archivo'+(k>1?'s':'')+' adjuntado'+(k>1?'s':'')+' a '+c);return k>0},'Adjuntar')}
 async function axDl(id){const x=find('anexosmod',id);if(!x)return;const b=x.blobId?await getBlob(x.blobId):null;if(!b){toast('Archivo no encontrado en este equipo');return}
   await saveBlob(x.nombre,b,(dOf(x)||SIN)+(x.plan?'/Plan de trabajo/'+x.plan:'/Anexos de módulos/'+x.modulo))}
+function vAnx(){return`${head('Anexos','Anexos del Plan de Trabajo – Despacho 01 y documentación de respaldo de cada módulo')}${anexosH()}`}
 function vCro(){const t=TAB.cro;return`${head('Cronograma y control','Cronograma (Gantt), hitos de control, indicadores y anexos de documentación por módulo')}${tabsH('cro')}${({gantt:ganttH,hitos:hitosH,ind:indH,anexos:anexosH})[t]()}`}
 
 /* ---------- exportación (PDF / Word / Excel) ---------- */
@@ -2872,9 +2874,22 @@ document.addEventListener('click',async e=>{const b=e.target.closest&&e.target.c
 });
 
 /* ---------- integración con la vista y con la copia a carpetas ---------- */
+const GRUPOS=[['Operación',['dash','inv','rep','ipe','mej']],['Documentación',['doc','anx']],['Planificación',['cal','cro']],['Territorio y datos',['map','exp']]];
+renderNav=function(){const by=Object.fromEntries(VIEWS.map(v=>[v[0],v])),used=new Set(),
+  btn=([k,t,c])=>`<button data-go="${k}" ${k===view?'aria-current="page"':''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k]||''}</svg>${t}${c?`<span class="n">${(S[c]||[]).length}</span>`:''}</button>`;
+  let h=GRUPOS.map(([g,ks])=>{const it=ks.map(k=>by[k]).filter(Boolean);it.forEach(v=>used.add(v[0]));return it.length?`<div class="grp">${g}</div>`+it.map(btn).join(''):''}).join('');
+  h+=VIEWS.filter(v=>!used.has(v[0])).map(btn).join('');$('#nav').innerHTML=h};
+function store(){const s=document.querySelector('.side');if(!s)return;let d=document.getElementById('v21-store');
+  if(!d){d=document.createElement('details');d.id='v21-store';d.innerHTML='<summary>Archivos y sincronización</summary><div class="v21in"></div>';const sy=s.querySelector('#sync');sy?s.insertBefore(d,sy):s.appendChild(d)}
+  const box=d.querySelector('.v21in');['v13-chip','v18-out','v18-cap'].forEach(id=>{const e=document.getElementById(id);if(e&&e.parentNode!==box)box.appendChild(e)})}
+const st2=document.createElement('style');st2.textContent=`.nav .grp{font:600 10.5px var(--f-body);letter-spacing:.09em;text-transform:uppercase;color:var(--side-muted);padding:14px 10px 4px}.nav .grp:first-child{padding-top:2px}
+#v21-store{margin-top:auto;border-top:1px solid var(--side-active);padding-top:10px;font-size:12px;color:var(--side-muted)}#v21-store summary{cursor:pointer;padding:7px 8px;border-radius:6px;font-weight:600;color:var(--side-ink)}#v21-store summary:hover{background:var(--side-active)}
+.v21in{display:flex;flex-direction:column;gap:6px;padding-top:6px}.v21in>*{margin:0!important;width:100%!important}.side #v21-store~.sync{margin-top:0}
+@media(max-width:860px){.nav .grp,#v21-store{display:none}}`;document.head.appendChild(st2);
+setTimeout(store,800);setTimeout(store,3000);
 const _r20=render;
-render=function(){if(view==='cal'||view==='cro'){const v=view;view='dash';try{_r20()}finally{view=v}
-  renderNav();$('#main').innerHTML=v==='cal'?vCal():vCro();document.title='Gestión de Residuos Peligrosos'}else _r20()};
+render=function(){if(view==='cal'||view==='cro'||view==='anx'){const v=view;view='dash';try{_r20()}finally{view=v}
+  renderNav();$('#main').innerHTML=v==='cal'?vCal():v==='cro'?vCro():vAnx();document.title='Gestión de Residuos Peligrosos'}else _r20();try{store()}catch(_){}};
 })();
 
 render();boot();
