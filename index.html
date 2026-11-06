@@ -2944,5 +2944,136 @@ document.addEventListener('click',e=>{
 });
 })();
 
+/* ====== v23 · ANEXOS DEL PLAN DE TRABAJO (DESPACHO 02) Y DEL INFORME DEL PRIMER DESPACHO + ÍTEMS TOMADOS DE LOS DOCUMENTOS ======
+   Solo agrega: dos cuadros de anexos en la vista «Anexos», 4 indicadores y 13 materiales del Despacho 1.
+   No modifica ni elimina nada de lo anterior. */
+(()=>{
+const LOC=typeof LOCAL!=='undefined'&&LOCAL;
+const Wr=()=>typeof canWrite==='undefined'||canWrite;
+const dO=r=>String((r&&r.despacho)||'').trim();
+['anexosmod','indicadores','materiales'].forEach(k=>{if(!S[k])S[k]=[]});
+
+/* Plan de Trabajo – Despacho 02 (numeral 14 · Anexos 1 a 8) */
+const D2=[
+ ['Anexo 1','Plano inicial y figuras del ATR'],
+ ['Anexo 2','ATS · Análisis de Trabajo Seguro'],
+ ['Anexo 3','Permiso de trabajo'],
+ ['Anexo 4','Registro de asistencia'],
+ ['Anexo 5','Reporte de incidentes, actos y condiciones subestándar'],
+ ['Anexo 6','Acta de verificación de la construcción del ATR'],
+ ['Anexo 7','Acta de conformidad de la construcción del ATR'],
+ ['Anexo 8','Registro de residuos generados por la construcción']
+];
+/* Informe del Primer Despacho (numeral 17 · Anexos A a O) */
+const INF=[
+ ['Anexo A','Vista satelital referencial del área de almacenamiento, Bahía Jibarito, Lote 192'],
+ ['Anexo B','Plano referencial de distribución de los materiales adquiridos en el almacén – Despacho 1'],
+ ['Anexo C','Cuadro de materiales por zona'],
+ ['Anexo D','Orden de Servicio y matriz de requerimiento de materiales'],
+ ['Anexo E','Checklists del Despacho (E-1 Inspección previa a la entrega · E-2 Seguridad del traslado)'],
+ ['Anexo F','Modelo – Acta de entrega y recepción'],
+ ['Anexo G','Modelo – Acta de custodia de materiales'],
+ ['Anexo H','Registro fotográfico'],
+ ['Anexo I','Cotizaciones, cuadro comparativo y órdenes de compra'],
+ ['Anexo J','Registros individuales de inspección'],
+ ['Anexo K','Fichas técnicas y certificados'],
+ ['Anexo L','Guías de remisión y documentos de transporte'],
+ ['Anexo M','Matriz IPERC, SCTR y SOAT'],
+ ['Anexo N','Documentación para la conformidad y el pago'],
+ ['Anexo O','Matriz de trazabilidad documental']
+];
+const CAT={
+ d2:{list:D2,desp:'Despacho 2',tit:'Plan de Trabajo – Despacho 02 · Anexos del plan',key:'plan',
+  hint:'Código de la carpeta: <b>Despacho 2 / Plan de trabajo / Anexo N</b>.'},
+ inf:{list:INF,desp:'Despacho 1',tit:'Informe del Primer Despacho · Anexos A a O',key:'anexoInf',
+  hint:'Los archivos quedan en <b>Despacho 1 / Anexos de módulos / General</b>, con el código del anexo en la descripción.'}
+};
+const filesOf=(cat,c)=>S.anexosmod.filter(x=>x[CAT[cat].key]===c&&dO(x)===CAT[cat].desp);
+function panel(cat){
+  const C=CAT[cat],ok=C.list.filter(([c])=>filesOf(cat,c).length).length;
+  return `<div class="panel" style="margin-bottom:14px" data-v23p="${cat}"><div style="padding:14px 14px 0;display:flex;gap:10px;flex-wrap:wrap;justify-content:space-between;align-items:baseline"><b>${C.tit}</b><span class="mut">${ok} de ${C.list.length} anexos adjuntados</span></div>
+  <div class="tw" style="padding:6px 14px 14px"><table style="min-width:560px"><thead><tr><th>Anexo</th><th>Contenido</th><th>Estado</th><th>Archivos</th><th></th></tr></thead><tbody>${C.list.map(([c,n])=>{const f=filesOf(cat,c);
+  return `<tr><td><b>${esc(c)}</b></td><td>${esc(n)}</td><td>${f.length?'<span class="pill ok">Adjuntado</span>':'<span class="pill warn">Pendiente</span>'}</td><td>${f.map(x=>esc(x.nombre)).join('<br>')||'<span class="mut">—</span>'}</td><td class="num">${Wr()?`<button class="btn sm" data-v23="upl" data-cat="${cat}" data-id="${esc(c)}">Adjuntar</button> `:''}${f.length?`<button class="btn sm" data-v20="axdl" data-id="${f[f.length-1].id}">Descargar</button>`:''}</td></tr>`}).join('')}</tbody></table></div>
+  <p class="v20hint" style="padding:0 14px 12px">${C.hint}</p></div>`;
+}
+function extra(){
+  const seedBtn=Wr()?`<div class="tools" style="margin-bottom:12px"><button class="btn sm" data-v23="seed">Cargar ítems de los documentos (13 materiales · 4 indicadores del Despacho 1)</button></div>`:'';
+  return panel('d2')+panel('inf')+seedBtn;
+}
+
+/* Adjuntar archivos a un anexo concreto */
+function pick(cat,code){
+  if(!LOC){toast('Subir anexos requiere la versión descargable (GitHub o archivo local)');return}
+  const C=CAT[cat],n=(C.list.find(x=>x[0]===code)||[])[1]||'';
+  const i=document.createElement('input');i.type='file';i.multiple=true;
+  i.onchange=async()=>{let k=0;
+    for(const f of i.files){try{const bid=newId();await putBlob(bid,f);
+      const rec=cat==='d2'?{modulo:'Plan de trabajo',plan:code}:{modulo:'General',anexoInf:code};
+      await save('anexosmod',{...rec,despacho:C.desp,desc:code+' · '+n,nombre:f.name,tipo:f.type||'',tamano:f.size,blobId:bid,fecha:today()});k++}
+      catch(e){toast('No se pudo guardar '+f.name)}}
+    if(k)toast(k+' archivo'+(k>1?'s':'')+' adjuntado'+(k>1?'s':'')+' a '+code)};
+  i.click();
+}
+
+/* Ítems tomados del Informe del Primer Despacho (Tablas 2 y 11) */
+const MAT=[
+ ['Absorbente granulado natural (saco 12 kg)','sacos',10,10,'sacos'],
+ ['Bolsas de polietileno 22"x36"x6 mm','unid.',15000,50000,'unid.'],
+ ['Paño absorbente HP100 38"x144 ft','rollos',2,4,'rollos'],
+ ['Barrera de contención doble propósito 3 m','unid.',5,15,'unid.'],
+ ['Cinta perimetral reflectante','unid.',5,11,'unid.'],
+ ['Cartelería de seguridad reflectante','unid.',12,22,'unid.'],
+ ['Geomembrana HDPE 0.50 mm (7x100 m)','rollos',5,6,'rollos'],
+ ['Cilindros de PVC','unid.',10,10,'unid.'],
+ ['Plástico azul doble ancho','rollo',1,1,'rollo'],
+ ['Buzo descartable Cat. III Tipo 5 y 6','unid.',300,720,'unid.'],
+ ['Big bag de polipropileno 1 m³','unid.',130,400,'unid.'],
+ ['Manguera de 2" x 50 m','unid.',6,6,'unid.'],
+ ['Pitón de 50 cm','unid.',3,3,'unid.']
+].map((m,i)=>({id:'v23-mat-'+String(i+1).padStart(2,'0'),creado:1000+i,despacho:'Despacho 1',material:m[0],unidad:m[1],cantidad:m[2],ficha:'Sí',cumple:'Cumple',
+  obs:'Material entregado en el Despacho 1 (Informe del Primer Despacho, Tabla N° 2). Cantidad referencial del contrato: '+nf(m[3])+' '+m[4]+'. Verificado conforme al Anexo N° 7 del TDR.'}));
+const IND=[
+ {nombre:'Cumplimiento del cronograma',formula:'Fechas efectivas frente al cronograma modificado. Meta: entrega y cierre documentario dentro del plazo de 20 días calendario.',unidad:'días calendario',meta:20,valor:15,sentido:'Menor es mejor',obs:'Resultado del Informe del Primer Despacho (Tabla N° 11): entrega entre los días 11 y 14; cierre documentario el día 15.'},
+ {nombre:'Cantidades entregadas frente a las validadas',formula:'Acta de entrega frente al requerimiento validado.',unidad:'%',meta:100,valor:100,sentido:'Mayor es mejor',obs:'Resultado del Informe del Primer Despacho (Tabla N° 11): 100 %.'},
+ {nombre:'Materiales conformes en la primera inspección',formula:'Registros de inspección. Meta: lo más cercano a 100 %.',unidad:'%',meta:100,valor:100,sentido:'Mayor es mejor',obs:'Resultado del Informe del Primer Despacho (Tabla N° 11): 13 de 13 ítems conformes.'},
+ {nombre:'Expediente documentario completo',formula:'Lista de verificación de entregables. Meta: 100 % de los entregables aplicables.',unidad:'%',meta:100,valor:100,sentido:'Mayor es mejor',obs:'Resultado del Informe del Primer Despacho (Tabla N° 11): 13 de 13.'}
+].map((r,i)=>({id:'v23-ind-'+(i+1),creado:1000+i,despacho:'Despacho 1',...r}));
+
+async function seedDocs(){
+  let n=0;
+  for(const [col,arr] of [['materiales',MAT],['indicadores',IND]]){
+    for(const r of arr){if(S[col].some(x=>x.id===r.id))continue;
+      try{await save(col,r);n++}catch(e){}}
+  }
+  toast(n?n+' ítems cargados desde los documentos':'Los ítems ya estaban cargados');
+}
+function auto(){
+  let done=false;try{done=localStorage.getItem('v23-seeded')}catch(e){}
+  if(done||!Wr())return;
+  let t=0;const iv=setInterval(async()=>{t++;
+    if(typeof mode!=='undefined'&&mode==='db'&&!loaded&&t<20)return;
+    clearInterval(iv);
+    try{localStorage.setItem('v23-seeded','1')}catch(e){}
+    await seedDocs();
+  },500);
+}
+setTimeout(auto,1200);
+
+/* Vista Anexos: los cuadros nuevos van debajo del cuadro de anexos del Plan Despacho 01 */
+const _r23=render;
+render=function(){
+  _r23();
+  if(view==='anx'){
+    const m=document.getElementById('main'),p=m&&m.querySelector('.panel');
+    if(p&&!m.querySelector('[data-v23p]'))p.insertAdjacentHTML('afterend',extra());
+  }
+};
+document.addEventListener('click',e=>{
+  const b=e.target.closest&&e.target.closest('[data-v23]');if(!b)return;
+  if(b.dataset.v23==='upl'){pick(b.dataset.cat,b.dataset.id);return}
+  if(b.dataset.v23==='seed'){seedDocs()}
+});
+})();
+
 render();boot();
 </script>
