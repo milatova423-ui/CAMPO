@@ -495,9 +495,10 @@ function modal(title,body,foot,cls=''){
 }
 const close=()=>{$('#layer').innerHTML=''};
 let toastT;function toast(m){let t=$('#toast');if(!t){t=document.createElement('div');t.id='toast';t.className='toast';t.setAttribute('role','status');document.body.appendChild(t)}t.textContent=m;t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,2600)}
-function confirmBox(msg,fn){
-  modal('Confirmar',`<div class="mb"><p style="margin:0">${msg}</p></div>`,`<div class="mf"><button class="btn" data-act="close">Cancelar</button><button class="btn pri" id="cf-ok" style="background:var(--bad);border-color:var(--bad);color:#fff">Eliminar</button></div>`,'sm');
-  $('#cf-ok').onclick=async()=>{try{await fn();close();toast('Eliminado')}catch(e){toast('No se pudo eliminar')}};
+function confirmBox(msg,fn,label='Eliminar',done='Eliminado'){
+  const del=label==='Eliminar';
+  modal('Confirmar',`<div class="mb"><p style="margin:0">${msg}</p></div>`,`<div class="mf"><button class="btn" data-act="close">Cancelar</button><button class="btn pri" id="cf-ok" ${del?'style="background:var(--bad);border-color:var(--bad);color:#fff"':''}>${label}</button></div>`,'sm');
+  $('#cf-ok').onclick=async()=>{try{await fn();close();toast(done)}catch(e){toast('No se pudo completar la acción')}};
 }
 const find=(c,id)=>S[c].find(x=>x.id===id);
 
@@ -1558,7 +1559,7 @@ const INVMAP=[['ubicacion',/ubicac/],['clasificacion',/clasif/],['tipoResiduo',/
 function impToInv(id){const x=find('imp',id);if(!x)return;const h=x.hojas.find(s=>s.r.length)||x.hojas[0],col={};h.h.forEach((t,i)=>{const n=ixNorm(t);const m=INVMAP.find(([k,re])=>col[k]===undefined&&re.test(n));if(m)col[m[0]]=i});
   const nums=['bueno','reacondicionar','malEstado','pesoKg','utmE','utmN'],ks=Object.keys(col);if(!ks.length){toast('No reconocí columnas del inventario en este archivo; se conserva tal cual');return}
   confirmBox(`Se crearán ${nf(h.r.length)} registros de inventario con ${ks.length} columna(s) reconocida(s). El archivo importado se conserva sin cambios.`,async()=>{const rows=h.r.map(r=>{const o={origen:'Generación operativa'};ks.forEach(k=>{const v=String(r[col[k]]??'').trim();o[k]=nums.includes(k)?(parseFloat(v.replace(',','.'))||0):v});o.ubicacion=o.ubicacion||'Sin ubicación';o.clasificacion=o.clasificacion||'Sin clasificar';o.tipoResiduo=o.tipoResiduo||'Sin tipo';o.tipoContenedor=o.tipoContenedor||'UNIDAD';o.origen=oriOf(o);return o});
-    if(LOCAL)await saveMany('inventario',rows);else for(const r of rows)await save('inventario',r);toast(nf(rows.length)+' registros cargados al inventario')})}
+    if(LOCAL)await saveMany('inventario',rows);else for(const r of rows)await save('inventario',r);toast(nf(rows.length)+' registros cargados al inventario')},'Cargar','Cargado')}
 
 /* ---------- Mapa solo de ubicación; el riesgo vive en la Matriz IPERC ---------- */
 const _vMap=vMap,TAIL='<section class="panel card" style="margin-top:14px"><h2>Mapa de calor IPERC';
@@ -1634,7 +1635,7 @@ function chip(){const s=document.querySelector('.side');if(!s)return;let b=$('#v
 const _r13=render;render=function(){_r13();chip()};
 document.addEventListener('click',async e=>{if(!e.target.closest('[data-act="v13dir"]'))return;if(!window.showDirectoryPicker){toast('Usa Chrome o Edge para esta función');return}
   try{if(SYNC.need){if(await SYNC.need.requestPermission({mode:'readwrite'})!=='granted')return;DIR=SYNC.need;SYNC.need=null}
-    else if(DIR){confirmBox('¿Desconectar la carpeta de sincronización? Tus datos siguen guardados en este navegador.',async()=>{DIR=null;await idb(['blob'],'readwrite',t=>t.objectStore('blob').delete('__dir'));chip()});return}
+    else if(DIR){confirmBox('¿Desconectar la carpeta de sincronización? Tus datos siguen guardados en este navegador.',async()=>{DIR=null;await idb(['blob'],'readwrite',t=>t.objectStore('blob').delete('__dir'));chip()},'Desconectar','Desconectado');return}
     else{DIR=await showDirectoryPicker({mode:'readwrite',id:'residuos'});await idb(['blob'],'readwrite',t=>t.objectStore('blob').put(DIR,'__dir'))}
     toast('Sincronizando…');await dirSync();toast(DIR?'Carpeta conectada: los cambios se guardan y se reciben en tiempo real':'No se pudo conectar la carpeta')}catch(err){if(err&&err.name!=='AbortError')toast('No se pudo conectar: '+(err.message||'permiso denegado'))}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
@@ -2327,7 +2328,7 @@ function gateUpd(){
   if(G.st==='on'||SKIP){if(g)g.remove();return}
   if(!g){g=document.createElement('div');g.id='gd-gate';document.body.insertBefore(g,document.body.firstChild)}
   const bad=location.protocol==='file:',brand='<div class="gl"><svg width="46" height="46" viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="7" fill="#f0b429"/><path d="M17 6l11 19H6z" fill="none" stroke="#13201a" stroke-width="2.4" stroke-linejoin="round"/><path d="M17 13v6" stroke="#13201a" stroke-width="2.4" stroke-linecap="round"/><circle cx="17" cy="22" r="1.4" fill="#13201a"/></svg></div><h1>Gestión de Residuos</h1>';
-  const sk=(!G.cid||G.st==='err'||G.st==='cfg')?'<button class="gsk" data-gd="skip">Continuar sin iniciar sesión (solo en este equipo)</button>':'';
+  const sk='<button class="gsk" data-gd="skip">Continuar sin iniciar sesión (solo en este equipo)</button>';
   let b='';
   if(G.st==='wait')b=`${brand}<p><b>${esc(G.msg||'Un momento…')}</b></p>`;
   else if(!G.cid||G.st==='cfg')b=`${brand}<p>Para iniciar sesión con Google, pega una sola vez el <b>ID de cliente OAuth</b> de tu proyecto de Google Cloud (Google Drive API activada; origen autorizado: <b>${esc(location.origin==='null'?'tu dirección https':location.origin)}</b>).</p>${bad?'<p class="gerr">Esta página está abierta como archivo (file://). Google no permite iniciar sesión así: ábrela desde una dirección https o http://localhost.</p>':''}<input id="gd-cid" placeholder="123456-abc.apps.googleusercontent.com" value="${esc(G.cid)}"><button class="gbtn" data-gd="savecid">Guardar ID de cliente</button>${sk}`;
