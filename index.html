@@ -2899,13 +2899,14 @@ const FASES=[
  {id:'gen',t:'General',s:'',k:['dash']},
  {id:'pre',t:'1 · Antes',s:'Preparación y acreditación',k:['cro','cal','ipe','personal','unidades']},
  {id:'dur',t:'2 · Durante',s:'Ejecución en campo',k:['rep','asistencia','monitor','transporte','materiales','inv','map']},
+ {id:'log',t:'Logística',s:'Costos, pasajes y valorización',k:['logres','valorizacion','camioneta','pasajes','gastoslog']},
  {id:'pos',t:'3 · Después',s:'Cierre y documentación',k:['mej','doc','anx','exp']},
  {id:'sis',t:'Sistema',s:'',k:['gdr']}
 ];
 const LS='v22-fases';
 let OFF={};
 try{OFF=JSON.parse(localStorage.getItem(LS)||'{}')||{}}catch(_){}
-const COL={pre:'#e8b95a',dur:'#5cc6a2',pos:'#7aa7e8'};
+const COL={pre:'#e8b95a',dur:'#5cc6a2',pos:'#7aa7e8',log:'#d99a5b'};
 const st=document.createElement('style');
 st.textContent=`
 .nav .fase{display:flex;align-items:center;gap:8px;width:100%;margin-top:10px;padding:6px 10px;background:none;border:0;border-radius:6px;cursor:pointer;color:var(--side-muted);text-align:left}
@@ -3073,6 +3074,150 @@ document.addEventListener('click',e=>{
   if(b.dataset.v23==='upl'){pick(b.dataset.cat,b.dataset.id);return}
   if(b.dataset.v23==='seed'){seedDocs()}
 });
+})();
+
+/* ====== v24 · LOGÍSTICA: VALORIZACIONES, CAMIONETA (HORAS, KM, COMBUSTIBLE), PASAJES, GASTOS Y RESUMEN ======
+   Solo agrega: 4 módulos con formulario y exportación, una vista de resumen y un grupo «Logística» en el menú.
+   Reutiliza GM / bsView / formGeneric / XT del bloque v8. No elimina nada de lo anterior. */
+(()=>{
+const LK=['valorizacion','camioneta','pasajes','gastoslog'];
+LK.forEach(k=>{if(!S[k])S[k]=[]});
+const SIN='Sin despacho',DESP=['Despacho 1','Despacho 2','Despacho 3'];
+const N=v=>{const x=parseFloat(String(v==null?'':v).replace(',','.'));return Number.isFinite(x)?x:0};
+const sol=n=>'S/ '+Number(n||0).toLocaleString('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2});
+const f1=n=>Number(n||0).toLocaleString('es-PE',{minimumFractionDigits:1,maximumFractionDigits:1});
+const dd=r=>String((r&&r.despacho)||'').trim()||SIN;
+const tmin=t=>{const p=String(t||'').split(':');return (+p[0])*60+(+p[1]||0)};
+const hrs=r=>{if(r.horaIni&&r.horaFin){let d=tmin(r.horaFin)-tmin(r.horaIni);if(d<0)d+=1440;return d/60}return N(r.horas)};
+const kmOf=r=>N(r.kmFin)>N(r.kmIni)&&N(r.kmIni)>=0&&r.kmFin?N(r.kmFin)-N(r.kmIni):N(r.km);
+function cam(r){const h=hrs(r),km=kmOf(r),gal=N(r.galones),comb=gal*N(r.precioGal),uso=h*N(r.tarifaHora)+km*N(r.tarifaKm),otros=N(r.otros);
+  return{h,km,gal,comb,uso,otros,total:comb+uso+otros}}
+const monto=r=>N(r.metrado)*N(r.pu);
+const PEND=r=>(r.estado||'Pendiente')!=='Pagado';
+const ft=cells=>`<tfoot><tr>${cells.map((c,i)=>`<td class="${/^\d|S\//.test(String(c))?'num':''}" style="font-weight:600;background:var(--surface2)">${c}</td>`).join('')}</tr></tfoot>`;
+const ESTV=['Elaborada','Presentada','Observada','Aprobada','Facturada','Pagada'];
+const MEDIO=['Aéreo','Terrestre','Fluvial','Camioneta 4x4','Otro'];
+const CAT=['Alquiler de camioneta','Alquiler de embarcación','Peaje / embarque / desembarque','Flete y carga','Embalaje','Alimentación','Alojamiento','Mantenimiento y repuestos','Lubricantes','Comunicaciones','Otros'];
+const COMP=['Factura','Boleta','Recibo','Sin comprobante'];
+
+Object.assign(GM,{
+ valorizacion:{title:'Valorizaciones',sub:'Valorización por despacho y período: partidas con metrado y precio unitario, estado de trámite, factura y pago.',nuevo:'Nueva valorización',t:'valorización',fil:'despacho',
+  f:v=>[{k:'nro',l:'N.º de valorización',req:1},{k:'despacho',l:'Despacho',sel:DESP,blank:1},
+   {k:'periodoIni',l:'Período · desde',type:'date'},{k:'periodoFin',l:'Período · hasta',type:'date'},
+   {k:'partida',l:'Partida / concepto valorizado',req:1,full:1},{k:'unidad',l:'Unidad'},{k:'metrado',l:'Metrado',type:'number'},
+   {k:'pu',l:'Precio unitario (S/)',type:'number'},{k:'avance',l:'Avance acumulado (%)',type:'number'},
+   {k:'estado',l:'Estado',sel:ESTV,def:'Elaborada'},{k:'fechaPres',l:'Fecha de presentación',type:'date'},{k:'fechaApr',l:'Fecha de aprobación',type:'date'},
+   {k:'factura',l:'N.º de factura'},{k:'fechaPago',l:'Fecha de pago',type:'date'},{k:'obs',l:'Observaciones',type:'textarea',full:1}],
+  search:r=>[r.nro,r.partida,r.despacho,r.factura,r.estado],
+  kpi:rs=>{const t=rs.reduce((a,r)=>a+monto(r),0),ap=rs.filter(r=>['Aprobada','Facturada','Pagada'].includes(r.estado)).reduce((a,r)=>a+monto(r),0),pg=rs.filter(r=>r.estado==='Pagada').reduce((a,r)=>a+monto(r),0);
+   return[['Valorizado',sol(t),rs.length+' partida'+(rs.length===1?'':'s')],['Aprobado',sol(ap),'','ok'],['Pagado',sol(pg),'','ok'],['Por cobrar',sol(t-pg),'','warn']]},
+  cols:[['N.º',r=>`<b>${esc(r.nro||'—')}</b><div class="mut">${esc(dd(r))}</div>`],['Período',r=>`<span class="mono">${fmtD(r.periodoIni)}<br>${fmtD(r.periodoFin)}</span>`],['Partida',r=>esc(r.partida||'—')],
+   ['Metrado',r=>`${nf(r.metrado)} <span class="mut">${esc(r.unidad||'')}</span>`,'num'],['P. unitario',r=>sol(r.pu),'num'],['Monto',r=>`<b>${sol(monto(r))}</b>`,'num'],
+   ['Avance',r=>r.avance?nf(r.avance)+' %':'—','num'],['Estado',r=>pl(r.estado||'Elaborada',r.estado==='Pagada'?'ok':r.estado==='Observada'?'bad':['Aprobada','Facturada'].includes(r.estado)?'ok':'warn')+(r.factura?`<div class="mono mut">${esc(r.factura)}</div>`:'')]],
+  foot:rs=>ft(['Total','','','','',sol(rs.reduce((a,r)=>a+monto(r),0)),'','','']),
+  _x:{h:['Monto (S/)'],r:r=>[monto(r)]}},
+
+ camioneta:{title:'Camioneta: horas y combustible',sub:'Horas de manejo, kilómetros y combustible por jornada o viaje, con el valor del uso (tarifa por hora y por km) y el costo total de cada unidad.',nuevo:'Nuevo registro de uso',t:'registro de uso de unidad',fil:'despacho',
+  f:v=>[{k:'fecha',l:'Fecha',type:'date',def:today(),req:1},{k:'despacho',l:'Despacho',sel:DESP,blank:1},
+   {k:'tipo',l:'Tipo de unidad',sel:['Camioneta 4x4','Embarcación fluvial liviana','Grupo electrógeno / otro equipo'],def:'Camioneta 4x4'},{k:'unidad',l:'Placa / matrícula / equipo',req:1},
+   {k:'conductor',l:'Conductor / motorista'},{k:'ruta',l:'Ruta, tramo o actividad',full:1},
+   {sec:'Horas contadas'},{k:'horaIni',l:'Hora de inicio',type:'time'},{k:'horaFin',l:'Hora de fin',type:'time'},{k:'horas',l:'Horas (si no registras inicio y fin)',type:'number'},
+   {sec:'Kilometraje'},{k:'kmIni',l:'Km inicial',type:'number'},{k:'kmFin',l:'Km final',type:'number'},{k:'km',l:'Km recorridos (si no registras el odómetro)',type:'number'},
+   {sec:'Combustible'},{k:'combustible',l:'Combustible',sel:['Gasolina','Diésel','Otro'],def:'Gasolina'},{k:'galones',l:'Galones',type:'number'},{k:'precioGal',l:'Precio por galón (S/)',type:'number'},{k:'grifo',l:'Grifo / comprobante'},
+   {sec:'Valorización del uso'},{k:'tarifaHora',l:'Tarifa por hora (S/)',type:'number'},{k:'tarifaKm',l:'Tarifa por km (S/)',type:'number'},{k:'otros',l:'Otros gastos del viaje: peajes, lubricantes (S/)',type:'number'},
+   {k:'obs',l:'Observaciones',type:'textarea',full:1}],
+  search:r=>[r.unidad,r.conductor,r.ruta,r.despacho,r.grifo],
+  kpi:rs=>{const c=rs.map(cam),h=c.reduce((a,x)=>a+x.h,0),km=c.reduce((a,x)=>a+x.km,0),g=c.reduce((a,x)=>a+x.gal,0),t=c.reduce((a,x)=>a+x.total,0);
+   return[['Horas de uso',f1(h)+' h',rs.length+' registro'+(rs.length===1?'':'s')],['Kilómetros',nf(km)+' km',g?f1(km/g)+' km por galón':''],['Combustible',nf(g)+' gal',sol(c.reduce((a,x)=>a+x.comb,0))],['Costo total',sol(t),h?sol(t/h)+' por hora':'','warn']]},
+  cols:[['Fecha',r=>`<span class="mono">${fmtD(r.fecha)}</span><div class="mut">${esc(dd(r))}</div>`],['Unidad',r=>`<b>${esc(r.unidad||'—')}</b><div class="mut">${esc(r.tipo||'')}${r.conductor?' · '+esc(r.conductor):''}</div>`],
+   ['Ruta / actividad',r=>esc(r.ruta||'—')],['Horas',r=>`<b>${f1(cam(r).h)} h</b>${r.horaIni&&r.horaFin?`<div class="mono mut">${esc(r.horaIni)}–${esc(r.horaFin)}</div>`:''}`,'num'],
+   ['Km',r=>nf(cam(r).km),'num'],['Combustible',r=>`${nf(cam(r).gal)} gal<div class="mut">${sol(cam(r).comb)}</div>`,'num'],['Valor del uso',r=>sol(cam(r).uso),'num'],['Total',r=>`<b>${sol(cam(r).total)}</b>`,'num']],
+  foot:rs=>{const c=rs.map(cam);return ft(['Total','','',f1(c.reduce((a,x)=>a+x.h,0))+' h',nf(c.reduce((a,x)=>a+x.km,0)),nf(c.reduce((a,x)=>a+x.gal,0))+' gal',sol(c.reduce((a,x)=>a+x.uso,0)),sol(c.reduce((a,x)=>a+x.total,0))])},
+  _x:{h:['Horas','Km recorridos','Combustible (S/)','Valor del uso (S/)','Total (S/)'],r:r=>{const c=cam(r);return[c.h,c.km,c.comb,c.uso,c.total]}}},
+
+ pasajes:{title:'Pasajes y viáticos',sub:'Pasajes del personal por tramo y medio de transporte (aéreo, terrestre, fluvial), con proveedor, comprobante y estado de pago.',nuevo:'Nuevo pasaje',t:'pasaje',fil:'despacho',
+  f:v=>[{k:'fecha',l:'Fecha de viaje',type:'date',def:today(),req:1},{k:'despacho',l:'Despacho',sel:DESP,blank:1},{k:'persona',l:'Pasajero',req:1},{k:'cargo',l:'Cargo'},
+   {k:'origen',l:'Origen'},{k:'destino',l:'Destino'},{k:'medio',l:'Medio de transporte',sel:MEDIO,def:'Terrestre'},{k:'motivo',l:'Motivo',sel:['Movilización','Desmovilización','Relevo de personal','Gestión administrativa','Otro'],def:'Movilización'},
+   {k:'proveedor',l:'Empresa / proveedor'},{k:'comprobante',l:'Tipo de comprobante',sel:COMP,blank:1},{k:'nroComp',l:'N.º de comprobante'},{k:'monto',l:'Monto (S/)',type:'number',req:1},
+   {k:'estado',l:'Estado de pago',sel:['Pendiente','Pagado'],def:'Pendiente'},{k:'obs',l:'Observaciones',type:'textarea',full:1}],
+  search:r=>[r.persona,r.cargo,r.origen,r.destino,r.proveedor,r.nroComp,r.despacho],
+  kpi:rs=>[['Pasajes',rs.length],['Total',sol(rs.reduce((a,r)=>a+N(r.monto),0))],['Pendiente de pago',sol(rs.filter(PEND).reduce((a,r)=>a+N(r.monto),0)),'','warn'],['Sin comprobante',rs.filter(r=>!r.comprobante||r.comprobante==='Sin comprobante').length,'','bad']],
+  cols:[['Fecha',r=>`<span class="mono">${fmtD(r.fecha)}</span><div class="mut">${esc(dd(r))}</div>`],['Pasajero',r=>`<b>${esc(r.persona||'—')}</b><div class="mut">${esc(r.cargo||'')}</div>`],
+   ['Tramo',r=>`${esc(r.origen||'—')} → ${esc(r.destino||'—')}<div class="mut">${esc(r.motivo||'')}</div>`],['Medio',r=>esc(r.medio||'—')+(r.proveedor?`<div class="mut">${esc(r.proveedor)}</div>`:'')],
+   ['Comprobante',r=>esc([r.comprobante,r.nroComp].filter(Boolean).join(' ')||'—')],['Monto',r=>`<b>${sol(r.monto)}</b>`,'num'],['Pago',r=>pl(r.estado||'Pendiente',r.estado==='Pagado'?'ok':'warn')]],
+  foot:rs=>ft(['Total','','','','',sol(rs.reduce((a,r)=>a+N(r.monto),0)),''])},
+
+ gastoslog:{title:'Gastos logísticos',sub:'Alquileres, fletes, embalaje, alimentación, alojamiento, mantenimiento y demás gastos de apoyo, por categoría y comprobante.',nuevo:'Nuevo gasto',t:'gasto logístico',fil:'categoria',
+  f:v=>[{k:'fecha',l:'Fecha',type:'date',def:today(),req:1},{k:'despacho',l:'Despacho',sel:DESP,blank:1},{k:'categoria',l:'Categoría',sel:CAT,def:CAT[0],req:1},{k:'descripcion',l:'Descripción',req:1,full:1},
+   {k:'proveedor',l:'Proveedor'},{k:'comprobante',l:'Tipo de comprobante',sel:COMP,blank:1},{k:'nroComp',l:'N.º de comprobante'},{k:'monto',l:'Monto (S/)',type:'number',req:1},
+   {k:'estado',l:'Estado de pago',sel:['Pendiente','Pagado'],def:'Pendiente'},{k:'obs',l:'Observaciones',type:'textarea',full:1}],
+  search:r=>[r.descripcion,r.categoria,r.proveedor,r.nroComp,r.despacho],
+  kpi:rs=>{const by={};rs.forEach(r=>{by[r.categoria||'Otros']=(by[r.categoria||'Otros']||0)+N(r.monto)});const top=Object.entries(by).sort((a,b)=>b[1]-a[1])[0];
+   return[['Gastos',rs.length],['Total',sol(rs.reduce((a,r)=>a+N(r.monto),0))],['Pendiente de pago',sol(rs.filter(PEND).reduce((a,r)=>a+N(r.monto),0)),'','warn'],['Mayor categoría',top?esc(top[0]):'—',top?sol(top[1]):'']]},
+  cols:[['Fecha',r=>`<span class="mono">${fmtD(r.fecha)}</span><div class="mut">${esc(dd(r))}</div>`],['Categoría',r=>`<span class="tag">${esc(r.categoria||'—')}</span>`],['Descripción',r=>esc(r.descripcion||'—')+(r.proveedor?`<div class="mut">${esc(r.proveedor)}</div>`:'')],
+   ['Comprobante',r=>esc([r.comprobante,r.nroComp].filter(Boolean).join(' ')||'—')],['Monto',r=>`<b>${sol(r.monto)}</b>`,'num'],['Pago',r=>pl(r.estado||'Pendiente',r.estado==='Pagado'?'ok':'warn')]],
+  foot:rs=>ft(['Total','','','',sol(rs.reduce((a,r)=>a+N(r.monto),0)),''])}
+});
+
+/* registro en la app (igual que el bloque v8): colecciones, exportación, íconos y menú */
+LK.forEach(k=>{const m=GM[k],fl=m.f({}).filter(x=>x.k),x=m._x||{h:[],r:()=>[]};VCOL[k]=k;F.gen[k]={q:'',s:''};
+  XT[k]={t:m.title,h:[...fl.map(y=>y.l),...x.h],rc:[],r:()=>sorted(k).map(r=>[...fl.map(y=>r[y.k]??''),...x.r(r)])}});
+Object.assign(ICON,{
+ logres:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+ valorizacion:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>',
+ camioneta:'<path d="M3 15l2-6h14l2 6v3H3z"/><circle cx="7.5" cy="18" r="1.6"/><circle cx="16.5" cy="18" r="1.6"/><path d="M3 4v4M6 4v4"/>',
+ pasajes:'<path d="M3 9a2 2 0 012-2h14a2 2 0 012 2v1a2 2 0 000 4v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1a2 2 0 000-4z"/><path d="M14 7v10" stroke-dasharray="2 2"/>',
+ gastoslog:'<circle cx="12" cy="12" r="9"/><path d="M14.5 9a2.5 2 0 00-2.5-1.5c-1.5 0-2.5.8-2.5 1.8s1 1.6 2.5 2 2.5.9 2.5 2-1 1.8-2.5 1.8A2.7 2 0 019.5 14.5M12 6.5V8M12 16v1.5"/>'});
+VIEWS.push(['logres','Resumen logístico',null],...LK.map(k=>[k,GM[k].title,k]));
+try{const h=location.hash.slice(1);if(GM[h]||h==='logres')view=h}catch(e){}
+
+/* ---------- Resumen logístico ---------- */
+F.logres={d:''};
+const inD=r=>!F.logres.d||dd(r)===F.logres.d;
+function totals(d){const f=r=>!d||dd(r)===d,C=S.camioneta.filter(f).map(cam),P=S.pasajes.filter(f),G=S.gastoslog.filter(f),V=S.valorizacion.filter(f);
+  const t={pas:P.reduce((a,r)=>a+N(r.monto),0),gas:G.reduce((a,r)=>a+N(r.monto),0),comb:C.reduce((a,x)=>a+x.comb,0),uso:C.reduce((a,x)=>a+x.uso,0),otros:C.reduce((a,x)=>a+x.otros,0),
+   h:C.reduce((a,x)=>a+x.h,0),km:C.reduce((a,x)=>a+x.km,0),gal:C.reduce((a,x)=>a+x.gal,0),val:V.reduce((a,r)=>a+monto(r),0),
+   pend:P.filter(PEND).reduce((a,r)=>a+N(r.monto),0)+G.filter(PEND).reduce((a,r)=>a+N(r.monto),0)};
+  t.cam=t.comb+t.uso+t.otros;t.log=t.pas+t.gas+t.cam;return t}
+const despAll=()=>[...new Set([...DESP,...LK.flatMap(k=>S[k].map(dd))])].filter(x=>x!==SIN||LK.some(k=>S[k].some(r=>dd(r)===SIN)));
+const mc=(l,v,ft,cl)=>`<div class="mc"><span>${l}</span><b${cl?` style="color:var(--${cl})"`:''}>${v}</b>${ft?`<small>${ft}</small>`:''}</div>`;
+function vLogRes(){
+  const d=F.logres.d,t=totals(d),L=despAll();
+  const chips=`<div class="chips" role="group" aria-label="Despacho" style="margin-bottom:12px"><button class="chip" data-v24="desp" data-id="" aria-pressed="${!d}">Todos los despachos</button>${L.map(n=>`<button class="chip" data-v24="desp" data-id="${esc(n)}" aria-pressed="${d===n}">${esc(n)}</button>`).join('')}</div>`;
+  const rows=L.map(n=>{const x=totals(n);return[n,x.pas,x.cam,x.gas,x.log,x.val,x.val-x.log]});
+  const catT={};S.gastoslog.filter(inD).forEach(r=>{const k=r.categoria||'Otros';catT[k]=(catT[k]||0)+N(r.monto)});
+  const medT={};S.pasajes.filter(inD).forEach(r=>{const k=r.medio||'Otro';medT[k]=(medT[k]||0)+N(r.monto)});
+  const tb=(h,b,tot)=>`<div class="panel tw" style="margin-bottom:14px"><table style="min-width:420px"><thead><tr>${h.map((c,i)=>`<th class="${i?'num':''}">${c}</th>`).join('')}</tr></thead><tbody>${b||`<tr><td colspan="${h.length}" class="mut">Sin registros</td></tr>`}</tbody>${tot||''}</table></div>`;
+  const none=!LK.some(k=>S[k].length);
+  return head('Resumen logístico','Gasto logístico, valorización y uso de la camioneta, por despacho. Se calcula con los módulos de Logística.','')+chips+
+  `<div class="mcs">${mc('Gasto logístico total',sol(t.log),'pasajes + camioneta + gastos')}${mc('Valorizado',sol(t.val))}${mc('Saldo (valorizado − gasto logístico)',sol(t.val-t.log),'',t.val-t.log<0?'bad':'ok')}${mc('Pendiente de pago',sol(t.pend),'pasajes y gastos','warn')}</div>`+
+  `<h2 style="font:700 18px var(--f-display);letter-spacing:.04em;text-transform:uppercase;margin:18px 0 8px">Camioneta y equipos</h2><div class="mcs">${mc('Horas de uso',f1(t.h)+' h')}${mc('Kilómetros',nf(t.km)+' km')}${mc('Combustible',nf(t.gal)+' gal',sol(t.comb))}${mc('Rendimiento',t.gal?f1(t.km/t.gal)+' km/gal':'—')}${mc('Costo por hora',t.h?sol(t.cam/t.h):'—','combustible + uso + otros')}${mc('Costo por km',t.km?sol(t.cam/t.km):'—')}</div>`+
+  `<h2 style="font:700 18px var(--f-display);letter-spacing:.04em;text-transform:uppercase;margin:18px 0 8px">Por despacho</h2>`+
+  tb(['Despacho','Pasajes','Camioneta','Gastos','Gasto logístico','Valorizado','Saldo'],rows.map(r=>`<tr><td><b>${esc(r[0])}</b></td>${r.slice(1).map(v=>`<td class="num">${sol(v)}</td>`).join('')}</tr>`).join(''))+
+  `<div class="grid2"><div><h2 style="font:700 18px var(--f-display);letter-spacing:.04em;text-transform:uppercase;margin:6px 0 8px">Gastos por categoría</h2>${tb(['Categoría','Monto'],Object.entries(catT).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${sol(v)}</td></tr>`).join(''))}</div>`+
+  `<div><h2 style="font:700 18px var(--f-display);letter-spacing:.04em;text-transform:uppercase;margin:6px 0 8px">Pasajes por medio</h2>${tb(['Medio','Monto'],Object.entries(medT).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${sol(v)}</td></tr>`).join(''))}</div></div>`+
+  (none?`<p class="mut">Aún no hay registros. Empieza por «Camioneta: horas y combustible», «Pasajes y viáticos» o «Gastos logísticos»; este resumen se llena solo.</p>`:'');
+}
+XT.logres={t:'Resumen logístico',h:['Despacho','Pasajes (S/)','Camioneta (S/)','Gastos (S/)','Gasto logístico (S/)','Valorizado (S/)','Saldo (S/)','Horas','Km','Galones'],rc:[],
+  r:()=>despAll().map(n=>{const x=totals(n);return[n,x.pas,x.cam,x.gas,x.log,x.val,x.val-x.log,x.h,x.km,x.gal]})};
+VCOL.logres='logres';
+
+/* ---------- vista y tablero ---------- */
+const _r24=render;
+render=function(){
+  if(view==='logres'){const v=view;view='dash';try{_r24()}finally{view=v}
+    renderNav();$('#main').innerHTML=vLogRes();document.title='Gestión de Residuos Peligrosos';return}
+  _r24();
+  if(view==='dash'){const ks=document.querySelectorAll('#main .kpis'),el=ks[ks.length-1];
+    if(el&&!document.querySelector('[data-v24k]')){const t=totals('');
+      el.insertAdjacentHTML('afterend',`<div class="kpis" data-v24k="1">
+      <button class="kpi" data-go="logres"><span class="lb">Gasto logístico</span><span class="big">${sol(t.log)}</span><span class="ft">pasajes ${sol(t.pas)} · gastos ${sol(t.gas)}</span></button>
+      <button class="kpi" data-go="valorizacion"><span class="lb">Valorizado</span><span class="big">${sol(t.val)}</span><span class="ft">${S.valorizacion.length} partida${S.valorizacion.length===1?'':'s'}</span></button>
+      <button class="kpi" data-go="camioneta"><span class="lb">Camioneta</span><span class="big">${f1(t.h)} h</span><span class="ft">${nf(t.km)} km · ${nf(t.gal)} gal · ${sol(t.cam)}</span></button>
+      <button class="kpi" data-go="pasajes"><span class="lb">Pendiente de pago</span><span class="big">${sol(t.pend)}</span><span class="ft">pasajes y gastos logísticos</span></button></div>`)}}
+};
+document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('[data-v24]');if(!b)return;
+  if(b.dataset.v24==='desp'){F.logres.d=b.dataset.id;render()}});
 })();
 
 render();boot();
